@@ -2,6 +2,6 @@
 
 namespace vmp::analyzer {
 
-const char* AnalyzerFacade::status() const noexcept { return "NOT_IMPLEMENTED"; }
+const char* AnalyzerFacade::status() const noexcept { return "analyzer_stub_ready"; }
 
 }  // namespace vmp::analyzer

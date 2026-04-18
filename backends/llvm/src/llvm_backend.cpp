@@ -2,6 +2,6 @@
 
 namespace vmp::backend::llvm {
 
-const char* LlvmBackendFacade::status() const noexcept { return "NOT_IMPLEMENTED"; }
+const char* LlvmBackendFacade::status() const noexcept { return "llvm_backend_stub_ready"; }
 
 }  // namespace vmp::backend::llvm

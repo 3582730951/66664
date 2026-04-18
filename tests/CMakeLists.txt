@@ -630,3 +630,87 @@ set_tests_properties(lift_relocation_carrying PROPERTIES PASS_REGULAR_EXPRESSION
 add_test(NAME rewriter_lift_integration_elf
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/arch/rewriter_lift_integration_elf.py $<TARGET_FILE:vmp-protect> ${CMAKE_SOURCE_DIR} ${CMAKE_BINARY_DIR})
 set_tests_properties(rewriter_lift_integration_elf PROPERTIES PASS_REGULAR_EXPRESSION "rewriter_lift_integration_elf OK")
+
+
+# final matrix (plan §17)
+add_executable(final_matrix_audit_helper ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/final_matrix_audit_helper.cpp)
+target_link_libraries(final_matrix_audit_helper PRIVATE vmp_runtime_audit)
+set_target_properties(final_matrix_audit_helper PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(final_matrix_perf_helper ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/final_matrix_perf_helper.cpp)
+target_link_libraries(final_matrix_perf_helper PRIVATE
+  vmp_runtime_audit
+  vmp_runtime_jit
+  vmp_runtime_strings
+  vmp_runtime_state
+  vmp_runtime_vm1
+  vmp_runtime_vm2
+  nlohmann_json::nlohmann_json)
+set_target_properties(final_matrix_perf_helper PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_test(NAME final_matrix_17_1_annotation_parity
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/annotation_parity.py
+          --source-dir ${CMAKE_SOURCE_DIR}
+          --build-dir ${CMAKE_BINARY_DIR}
+          --vmp-clang $<TARGET_FILE:vmp-clang>
+          --rust-policy-out ${CMAKE_BINARY_DIR}/tests/demo_sample_rust.policy.json)
+set_tests_properties(final_matrix_17_1_annotation_parity PROPERTIES PASS_REGULAR_EXPRESSION "annotation parity OK")
+vmp_unset_ci_polluters(final_matrix_17_1_annotation_parity)
+
+add_test(NAME final_matrix_17_2_functional_consistency
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/functional_consistency.py
+          --source-dir ${CMAKE_SOURCE_DIR}
+          --build-dir ${CMAKE_BINARY_DIR}
+          --vm1-asm $<TARGET_FILE:vmp-vm1-asm>
+          --vm1-run $<TARGET_FILE:vmp-vm1-run>
+          --vm2-asm $<TARGET_FILE:vmp-vm2-asm>
+          --vm2-run $<TARGET_FILE:vmp-vm2-run>
+          --string-protect $<TARGET_FILE:vmp-string-protect>)
+set_tests_properties(final_matrix_17_2_functional_consistency PROPERTIES PASS_REGULAR_EXPRESSION "functional consistency OK")
+vmp_unset_ci_polluters(final_matrix_17_2_functional_consistency)
+
+add_test(NAME final_matrix_17_3_jit_hotspot
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/jit_hotspot.py
+          --source-dir ${CMAKE_SOURCE_DIR}
+          --build-dir ${CMAKE_BINARY_DIR}
+          --vm1-asm $<TARGET_FILE:vmp-vm1-asm>
+          --vm1-run $<TARGET_FILE:vmp-vm1-run>
+          --fusion-test $<TARGET_FILE:fusion_does_not_change_policy>)
+set_tests_properties(final_matrix_17_3_jit_hotspot PROPERTIES PASS_REGULAR_EXPRESSION "jit hotspot OK")
+vmp_unset_ci_polluters(final_matrix_17_3_jit_hotspot)
+
+add_test(NAME final_matrix_17_4_audit_events
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/audit_events.py
+          --audit-helper $<TARGET_FILE:final_matrix_audit_helper>
+          --build-dir ${CMAKE_BINARY_DIR})
+set_tests_properties(final_matrix_17_4_audit_events PROPERTIES PASS_REGULAR_EXPRESSION "audit events OK")
+
+add_test(NAME final_matrix_17_5_platform_matrix
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/platform_matrix.py
+          --platform ${VMP_PLATFORM}
+          --arch ${VMP_ARCH})
+set_tests_properties(final_matrix_17_5_platform_matrix PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP_REASON")
+
+add_test(NAME final_matrix_17_6_perf
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/perf/bench.py
+          --build-dir ${CMAKE_BINARY_DIR}
+          --vm1-interpret $<TARGET_FILE:jit_disabled>
+          --vm1-jit $<TARGET_FILE:jit_backend_switch>
+          --vm2-interpret $<TARGET_FILE:vm2_jit_disabled>
+          --vm2-jit $<TARGET_FILE:vm2_jit_function_level_only>
+          --cross-domain $<TARGET_FILE:vm1_cross_domain_call>
+          --key-rotation $<TARGET_FILE:jit_invalidate_key_rotation>
+          --audit-off $<TARGET_FILE:vm1_arith_ops>
+          --audit-on $<TARGET_FILE:vm1_breakpoint_event>)
+set_tests_properties(final_matrix_17_6_perf PROPERTIES PASS_REGULAR_EXPRESSION "perf bench OK")
+
+add_test(NAME final_matrix_summary_test
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/print_summary.py --build-dir ${CMAKE_BINARY_DIR})
+set_tests_properties(final_matrix_summary_test PROPERTIES
+  DEPENDS "final_matrix_17_1_annotation_parity;final_matrix_17_2_functional_consistency;final_matrix_17_3_jit_hotspot;final_matrix_17_4_audit_events;final_matrix_17_5_platform_matrix;final_matrix_17_6_perf"
+  PASS_REGULAR_EXPRESSION "final matrix summary OK")
+
+add_custom_target(final_matrix_summary
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/final_matrix/print_summary.py --build-dir ${CMAKE_BINARY_DIR}
+  DEPENDS final_matrix_perf_helper final_matrix_audit_helper
+  COMMENT "Printing final matrix summary")

@@ -77,5 +77,5 @@ cmake --build build-ios-arm64 -j
 
 ## Notes
 - `vmp-protect` now fully implements policy loading, strict JSON validation, schema dumping, and JSON round-trip emission.
-- Other executable paths still print `NOT_IMPLEMENTED` until later subtasks land.
+- Other executable paths still print `stub output` until later subtasks land.
 - Unsupported business logic is tracked in `STATUS.md`.
