@@ -239,3 +239,40 @@
   - `cargo test --workspace`：通过。
   - `rg -n 'NOT_IMPLEMENTED' bindings/cpp`：无结果。
   - `/tmp/vmp_ci_sim` 中重跑 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`：全部通过。
+
+### ci_fix_round_3
+- 改动清单：
+  - 仓库内移除 `.cargo/config.toml`（`git rm` 语义），避免 GitHub runner 被 Debian 本地 registry 路径 `/usr/share/cargo/registry` 绑死；容器内改走家目录级 `/root/.cargo/config.toml`，CI workflow 无需改动。
+  - `.gitignore` 补齐/确认：`.cargo/`、`vm_runtime_audit.log`、`*.log`、`build-*/`、`target/`、`**/target/`；复检当前 git tracked 临时日志 / `build-*` 生成物，无新增需清理项。
+  - `tests/CMakeLists.txt`：新增 `if(WIN32) set(VMP_TEST_BIN_SUFFIX ".exe") endif()`；所有 ctest 中被测二进制统一改为 `$<TARGET_FILE:...>` 传绝对路径，不再手写 `${CMAKE_BINARY_DIR}/tools/...` / `${CMAKE_BINARY_DIR}/tests/...`。
+  - `tests/CMakeLists.txt`：`cross_language_golden` 现在显式把 `audit_cpp_format` 绝对路径与 `${CMAKE_SOURCE_DIR}` 传给 Python 驱动，并加 `SKIP_REGULAR_EXPRESSION "cross language audit golden SKIPPED"`。
+  - `tests/audit/compare_cpp_rust_audit.py`：
+    - 通过 `argv` 接收 C++ helper 绝对路径、fixture、repo root；
+    - 先 `shutil.which("cargo")` 检查 cargo，可用性缺失时输出 skip 而非 error；
+    - `cargo build -p rust_audit --example format_record` 后直接执行生成的 example 二进制（`.exe` / 非 `.exe` 都支持），不再 `cargo run`。
+  - `tests/policy/compare_cpp_rust.py`：同样改为 cargo availability 检查 + `cargo build` + 直接执行 example，可避免 shell/路径差异。
+- 变更文件：
+  - `.cargo/config.toml`（删除，不再入仓）
+  - `.gitignore`
+  - `tests/CMakeLists.txt`
+  - `tests/audit/compare_cpp_rust_audit.py`
+  - `tests/policy/compare_cpp_rust.py`
+  - `STATUS.md`
+- 本地验证（仓库原路径 `/workspace/vmp`）：
+  - `CARGO_NET_OFFLINE=1 cargo build -q -p rust_audit --example format_record`：通过；证明去掉仓库内 `.cargo/config.toml` 后，容器仍可通过家目录级 cargo config 离线构建。
+  - `cmake -S . -B build-ci-fix3 -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64`：通过。
+  - `cmake --build build-ci-fix3 -j2`：通过。
+  - `ctest --test-dir build-ci-fix3 --output-on-failure`：`20/20` 通过。
+- `/tmp` 路径验证（CI 模拟目录 `/tmp/vmp_ci_sim_win`）：
+  - 先复制仓库到 `/tmp/vmp_ci_sim_win`，再 `rm -rf build-* target`。
+  - `cmake -S . -B build-multi -G 'Ninja Multi-Config' -DCMAKE_CONFIGURATION_TYPES=Release -DVMP_PLATFORM=linux -DVMP_ARCH=x64`：通过。
+  - `cmake --build build-multi --config Release -j2`：通过。
+  - `ctest --test-dir build-multi -C Release --output-on-failure`：`20/20` 通过。
+- 如何保证 Windows 也能过：
+  - 通过 `$<TARGET_FILE:vmp-protect>` / `$<TARGET_FILE:audit_cpp_format>` / `$<TARGET_FILE:vmp-clang>` 等 generator expression，CTest 生成时已解析为多配置真实路径；在 `/tmp/vmp_ci_sim_win/build-multi/tests/CTestTestfile.cmake` 中可见 `tools/Release/vmp-protect`、`tests/Release/audit_cpp_format`、`tools/Release/vmp-clang++` 等实际命令。
+  - Python 驱动不再自行拼接后缀或相对路径，统一消费 CMake 传入的绝对路径 argv；因此 MSVC 的 `Release/*.exe` 路径也能被同一套驱动直接执行。
+  - cargo 相关驱动已移除 `cargo run`，改成 `cargo build` 后直接 exec example，规避 Windows shell 解析差异。
+- 未完成项：
+  - 远端 GH Actions 结果尚待 supervisor 观察；若仍有 Windows-only 特例（例如 MSVC/clang-cl 工具链细节），进入下一轮再修。
+- 下一子任务建议：
+  - 等待 supervisor 回看最新 GH Actions；若 Windows runner 仍有特殊失败，优先抓取对应 job 的 CTest command line / stderr 做定点修复。

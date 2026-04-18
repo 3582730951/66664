@@ -1,5 +1,10 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+set(VMP_TEST_BIN_SUFFIX "")
+if(WIN32)
+  set(VMP_TEST_BIN_SUFFIX ".exe")
+endif()
+
 set(VMP_POLICY_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/policy/examples")
 set(VMP_AUDIT_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/audit")
 set(VMP_BINDINGS_CPP_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bindings_cpp")
@@ -25,15 +30,15 @@ set_tests_properties(policy_cpp_test PROPERTIES
   ENVIRONMENT "VMP_POLICY_FIXTURES_DIR=${VMP_POLICY_FIXTURES_DIR}")
 
 add_test(NAME vmp_protect_good_policy
-  COMMAND ${CMAKE_BINARY_DIR}/tools/vmp-protect --policy ${CMAKE_CURRENT_SOURCE_DIR}/policy/examples/good.json)
+  COMMAND $<TARGET_FILE:vmp-protect> --policy ${CMAKE_CURRENT_SOURCE_DIR}/policy/examples/good.json)
 set_tests_properties(vmp_protect_good_policy PROPERTIES PASS_REGULAR_EXPRESSION "OK: policy loaded, 2 entries, schema=v1")
 
 add_test(NAME vmp_protect_bad_policy
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/policy/assert_bad_policy.py ${CMAKE_BINARY_DIR}/tools/vmp-protect ${CMAKE_CURRENT_SOURCE_DIR}/policy/examples/bad_vm_func_native.json)
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/policy/assert_bad_policy.py $<TARGET_FILE:vmp-protect> ${CMAKE_CURRENT_SOURCE_DIR}/policy/examples/bad_vm_func_native.json)
 set_tests_properties(vmp_protect_bad_policy PROPERTIES PASS_REGULAR_EXPRESSION "bad policy rejected as expected")
 
 add_test(NAME vmp_protect_dump_schema
-  COMMAND ${CMAKE_BINARY_DIR}/tools/vmp-protect --dump-schema)
+  COMMAND $<TARGET_FILE:vmp-protect> --dump-schema)
 set_tests_properties(vmp_protect_dump_schema PROPERTIES PASS_REGULAR_EXPRESSION "language_origin")
 
 add_executable(audit_cpp_test ${CMAKE_CURRENT_SOURCE_DIR}/audit/audit_cpp_test.cpp)
@@ -47,15 +52,17 @@ target_link_libraries(audit_cpp_format PRIVATE vmp_runtime_audit nlohmann_json::
 set_target_properties(audit_cpp_format PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
 add_test(NAME audit_cpp_test
-  COMMAND ${CMAKE_BINARY_DIR}/tests/audit_cpp_test)
+  COMMAND $<TARGET_FILE:audit_cpp_test>)
 set_tests_properties(audit_cpp_test PROPERTIES PASS_REGULAR_EXPRESSION "audit_cpp_test OK")
 
 add_test(NAME cross_language_golden
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/audit/compare_cpp_rust_audit.py ${CMAKE_BINARY_DIR}/tests/audit_cpp_format ${CMAKE_CURRENT_SOURCE_DIR}/audit/golden_record.json)
-set_tests_properties(cross_language_golden PROPERTIES PASS_REGULAR_EXPRESSION "cross language audit golden OK")
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/audit/compare_cpp_rust_audit.py $<TARGET_FILE:audit_cpp_format> ${CMAKE_CURRENT_SOURCE_DIR}/audit/golden_record.json ${CMAKE_SOURCE_DIR})
+set_tests_properties(cross_language_golden PROPERTIES
+  PASS_REGULAR_EXPRESSION "cross language audit golden OK"
+  SKIP_REGULAR_EXPRESSION "cross language audit golden SKIPPED")
 
 add_test(NAME vmp_protect_detector_selftest
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/audit/assert_detector_selftest.py ${CMAKE_BINARY_DIR}/tools/vmp-protect ${CMAKE_BINARY_DIR}/tests/detector_selftest.log)
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/audit/assert_detector_selftest.py $<TARGET_FILE:vmp-protect> ${CMAKE_BINARY_DIR}/tests/detector_selftest.log)
 set_tests_properties(vmp_protect_detector_selftest PROPERTIES PASS_REGULAR_EXPRESSION "detector selftest OK")
 
 # bindings/cpp tests
@@ -69,13 +76,13 @@ set(VMP_CPP_COMPARE ${CMAKE_CURRENT_SOURCE_DIR}/bindings_cpp/compare_policy_json
 set(VMP_CPP_ASSERT_EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bindings_cpp/assert_exists.py)
 
 add_test(NAME bindings_cpp_collect_c
-  COMMAND ${CMAKE_BINARY_DIR}/tools/vmp-clang -c ${VMP_CPP_SAMPLE_C} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_c.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_c.o)
+  COMMAND $<TARGET_FILE:vmp-clang> -c ${VMP_CPP_SAMPLE_C} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_c.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_c.o)
 add_test(NAME bindings_cpp_collect_c_compare
   COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_COMPARE} ${CMAKE_BINARY_DIR}/tests/sample_c.policy.json ${VMP_CPP_EXPECTED_C})
 set_tests_properties(bindings_cpp_collect_c_compare PROPERTIES DEPENDS bindings_cpp_collect_c PASS_REGULAR_EXPRESSION "policy json equal")
 
 add_test(NAME bindings_cpp_collect_cpp
-  COMMAND ${CMAKE_BINARY_DIR}/tools/vmp-clang++ -std=c++17 -c ${VMP_CPP_SAMPLE_CPP} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_cpp.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_cpp.o)
+  COMMAND $<TARGET_FILE:vmp-clang++> -std=c++17 -c ${VMP_CPP_SAMPLE_CPP} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_cpp.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_cpp.o)
 if(VMP_BINDINGS_CPP_HAVE_CLANG_PLUGIN)
   add_test(NAME bindings_cpp_collect_cpp_compare
     COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_COMPARE} ${CMAKE_BINARY_DIR}/tests/sample_cpp.policy.json ${VMP_CPP_EXPECTED_CPP_PLUGIN})
@@ -86,7 +93,7 @@ endif()
 set_tests_properties(bindings_cpp_collect_cpp_compare PROPERTIES DEPENDS bindings_cpp_collect_cpp PASS_REGULAR_EXPRESSION "policy json equal")
 
 add_test(NAME bindings_cpp_collect_cpp_fallback
-  COMMAND ${CMAKE_COMMAND} -E env VMP_DISABLE_CLANG_PLUGIN=1 ${CMAKE_BINARY_DIR}/tools/vmp-clang++ -std=c++17 -c ${VMP_CPP_SAMPLE_CPP} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.o)
+  COMMAND ${CMAKE_COMMAND} -E env VMP_DISABLE_CLANG_PLUGIN=1 $<TARGET_FILE:vmp-clang++> -std=c++17 -c ${VMP_CPP_SAMPLE_CPP} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.o)
 add_test(NAME bindings_cpp_collect_cpp_fallback_compare
   COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_COMPARE} ${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.policy.json ${VMP_CPP_EXPECTED_CPP_FALLBACK})
 set_tests_properties(bindings_cpp_collect_cpp_fallback_compare PROPERTIES DEPENDS bindings_cpp_collect_cpp_fallback PASS_REGULAR_EXPRESSION "policy json equal")
@@ -105,7 +112,7 @@ if(MSVC)
 endif()
 
 add_test(NAME bindings_cpp_vmp_clang_passthrough
-  COMMAND ${CMAKE_BINARY_DIR}/tools/vmp-clang -c ${VMP_CPP_SAMPLE_C} -I ${VMP_CPP_INCLUDE_DIR} -o ${CMAKE_BINARY_DIR}/tests/passthrough_c.o)
+  COMMAND $<TARGET_FILE:vmp-clang> -c ${VMP_CPP_SAMPLE_C} -I ${VMP_CPP_INCLUDE_DIR} -o ${CMAKE_BINARY_DIR}/tests/passthrough_c.o)
 add_test(NAME bindings_cpp_vmp_clang_passthrough_exists
   COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_ASSERT_EXISTS} ${CMAKE_BINARY_DIR}/tests/passthrough_c.o)
 set_tests_properties(bindings_cpp_vmp_clang_passthrough_exists PROPERTIES DEPENDS bindings_cpp_vmp_clang_passthrough PASS_REGULAR_EXPRESSION "exists:")

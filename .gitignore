@@ -17,4 +17,4 @@ passwd.txt
 .git-credentials
 vm_runtime_audit.log
 *.log
-.cargo/registry/
+.cargo/
