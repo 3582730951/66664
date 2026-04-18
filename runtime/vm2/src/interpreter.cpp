@@ -1,0 +1,478 @@
+#include <vmp/runtime/vm2/vm2.h>
+
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <sstream>
+#include <stdexcept>
+
+#include <vmp/runtime/vm1/vm1.h>
+
+namespace vmp::runtime::vm2 {
+namespace {
+
+std::uint16_t read_u16(const std::vector<std::uint8_t>& code, std::size_t& pc) {
+  if (pc + 2 > code.size()) throw Vm2Exception(static_cast<std::uint32_t>(pc), "vm2: truncated u16 operand");
+  const auto value = static_cast<std::uint16_t>(code[pc]) | static_cast<std::uint16_t>(code[pc + 1] << 8u);
+  pc += 2;
+  return value;
+}
+
+std::uint32_t read_u32(const std::vector<std::uint8_t>& code, std::size_t& pc) {
+  if (pc + 4 > code.size()) throw Vm2Exception(static_cast<std::uint32_t>(pc), "vm2: truncated u32 operand");
+  std::uint32_t value = 0;
+  for (int i = 0; i < 4; ++i) value |= static_cast<std::uint32_t>(code[pc + static_cast<std::size_t>(i)]) << (8 * i);
+  pc += 4;
+  return value;
+}
+
+std::uint64_t read_u64(const std::vector<std::uint8_t>& code, std::size_t& pc) {
+  if (pc + 8 > code.size()) throw Vm2Exception(static_cast<std::uint32_t>(pc), "vm2: truncated u64 operand");
+  std::uint64_t value = 0;
+  for (int i = 0; i < 8; ++i) value |= static_cast<std::uint64_t>(code[pc + static_cast<std::size_t>(i)]) << (8 * i);
+  pc += 8;
+  return value;
+}
+
+std::int32_t read_i32(const std::vector<std::uint8_t>& code, std::size_t& pc) {
+  return static_cast<std::int32_t>(read_u32(code, pc));
+}
+
+double bit_cast_double(std::uint64_t value) {
+  double out = 0.0;
+  std::memcpy(&out, &value, sizeof(out));
+  return out;
+}
+
+std::uint64_t bit_cast_u64(double value) {
+  std::uint64_t out = 0;
+  std::memcpy(&out, &value, sizeof(out));
+  return out;
+}
+
+void dispatch_audit(Vm2Context& context, const std::string& event_type, const std::string& note) {
+  if (context.audit_dispatcher == nullptr) return;
+  context.audit_dispatcher->dispatch(vmp::runtime::audit::make_event(event_type, note, context.pc, "vm2", "", 0),
+                                     vmp::runtime::audit::ReactionPolicy::audit_only);
+}
+
+std::uint64_t resolve_address(const Vm2Context& context, std::uint8_t base, std::int32_t offset) {
+  std::uint64_t base_value = 0;
+  if (base == static_cast<std::uint8_t>(MemoryBase::sp)) {
+    base_value = context.sp;
+  } else if (base < kVm2GeneralRegisterCount) {
+    base_value = context.r[base];
+  } else {
+    throw Vm2Exception(context.pc, "vm2: invalid memory base register");
+  }
+  if (offset >= 0) return base_value + static_cast<std::uint64_t>(offset);
+  return base_value - static_cast<std::uint64_t>(-static_cast<std::int64_t>(offset));
+}
+
+void set_predicates_from_value(Vm2Context& context, std::uint64_t value, bool carry = false, bool overflow = false) {
+  context.p[0] = (value == 0);
+  context.p[1] = (static_cast<std::int64_t>(value) < 0);
+  context.p[2] = carry;
+  context.p[3] = overflow;
+}
+
+void set_predicates_from_vec(Vm2Context& context, const Vec128& value) {
+  context.p[0] = value.u64.lo == 0 && value.u64.hi == 0;
+  context.p[1] = (static_cast<std::int64_t>(value.u64.hi) < 0);
+  context.p[2] = false;
+  context.p[3] = false;
+}
+
+bool overflow_add(std::int64_t lhs, std::int64_t rhs, std::int64_t result) {
+  return ((lhs ^ result) & (rhs ^ result)) < 0;
+}
+
+bool overflow_sub(std::int64_t lhs, std::int64_t rhs, std::int64_t result) {
+  return ((lhs ^ rhs) & (lhs ^ result)) < 0;
+}
+
+void enter_call(Vm2Context& context, std::uint32_t target_pc, std::uint8_t arg_count, std::uint32_t return_pc) {
+  const std::size_t spill_count = arg_count > 8 ? static_cast<std::size_t>(arg_count - 8) : 0u;
+  Vm2Context::CallFrame frame;
+  frame.r = context.r;
+  frame.q = context.q;
+  frame.d = context.d;
+  frame.p = context.p;
+  frame.caller_lr = context.lr;
+  frame.caller_sp = context.sp;
+  context.frames_.push_back(frame);
+  if (spill_count > 0) {
+    const auto spill_base = context.allocate_spill(spill_count * sizeof(std::uint64_t), "call spill");
+    for (std::size_t i = 0; i < spill_count; ++i) {
+      std::uint64_t value = 0;
+      const auto caller_addr = frame.caller_sp + static_cast<std::uint64_t>(i * sizeof(std::uint64_t));
+      if (frame.caller_sp < context.stack_size() && caller_addr + sizeof(std::uint64_t) <= context.stack_size()) {
+        value = context.read_memory<std::uint64_t>(caller_addr);
+      } else if (8 + i < context.r.size()) {
+        value = context.r[8 + i];
+      }
+      context.write_memory<std::uint64_t>(spill_base + static_cast<std::uint64_t>(i * sizeof(std::uint64_t)), value);
+    }
+  }
+  context.lr = return_pc;
+  context.pc = target_pc;
+}
+
+void leave_call(Vm2Context& context, bool& halted) {
+  const auto ret_int = context.r[0];
+  const auto ret_float = context.d[0];
+  const auto ret_vec = context.q[0];
+  if (context.frames_.empty()) {
+    context.clear_frame_transient_strings();
+    halted = true;
+    context.r[0] = ret_int;
+    context.d[0] = ret_float;
+    context.q[0] = ret_vec;
+    return;
+  }
+  context.clear_frame_transient_strings();
+  const auto frame = context.frames_.back();
+  context.frames_.pop_back();
+  context.r = frame.r;
+  context.q = frame.q;
+  context.d = frame.d;
+  context.p = frame.p;
+  context.sp = frame.caller_sp;
+  context.pc = context.lr;
+  context.lr = frame.caller_lr;
+  context.r[0] = ret_int;
+  context.d[0] = ret_float;
+  context.q[0] = ret_vec;
+  set_predicates_from_value(context, ret_int);
+}
+
+vmp::runtime::bridge::Domain bridge_domain_from_byte(std::uint8_t raw) {
+  switch (raw) {
+    case 0: return vmp::runtime::bridge::Domain::native;
+    case 1: return vmp::runtime::bridge::Domain::vm1;
+    case 2: return vmp::runtime::bridge::Domain::vm2;
+    default: throw Vm2Exception(0, "vm2: invalid bridge domain");
+  }
+}
+
+}  // namespace
+
+Vm2Interpreter::Vm2Interpreter() { assert(vmp::runtime::vm1::handler_table_identity() != handler_table_identity()); }
+
+ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
+  if (context.module == nullptr) throw Vm2Exception(0, "vm2: null module");
+  if (context.pc > context.module->code.size()) throw Vm2Exception(context.pc, "vm2: entry pc out of range");
+  bool halted = false;
+  try {
+    while (!halted) {
+      if (context.pc >= context.module->code.size()) throw Vm2Exception(context.pc, "vm2: pc out of range");
+      bool control_flow_changed = false;
+      const auto instruction_pc = context.pc;
+      std::size_t cursor = context.pc;
+      const auto opcode = static_cast<Opcode>(read_u16(context.module->code, cursor));
+      context.pc = static_cast<std::uint32_t>(cursor);
+      switch (opcode) {
+        case Opcode::nop:
+          break;
+        case Opcode::brk:
+          dispatch_audit(context, "vm2_breakpoint", "brk opcode executed");
+          break;
+        case Opcode::ftrap: {
+          const auto code = read_u32(context.module->code, cursor);
+          context.pc = instruction_pc;
+          dispatch_audit(context, "vm2_trap", "ftrap opcode executed");
+          throw Vm2Exception(instruction_pc, "vm2 trap code=" + std::to_string(code));
+        }
+        case Opcode::ildimm: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto imm = read_u64(context.module->code, cursor);
+          context.r.at(dst) = imm;
+          set_predicates_from_value(context, imm);
+          break;
+        }
+        case Opcode::vldimm: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto index = read_u32(context.module->code, cursor);
+          if (index >= context.module->const_pool.size()) throw Vm2Exception(instruction_pc, "vm2: const pool index out of range");
+          Vec128 value{};
+          for (int i = 0; i < 8; ++i) value.u64.lo |= static_cast<std::uint64_t>(context.module->const_pool[index].bytes[static_cast<std::size_t>(i)]) << (8 * i);
+          for (int i = 0; i < 8; ++i) value.u64.hi |= static_cast<std::uint64_t>(context.module->const_pool[index].bytes[8 + static_cast<std::size_t>(i)]) << (8 * i);
+          context.q.at(dst) = value;
+          set_predicates_from_vec(context, value);
+          break;
+        }
+        case Opcode::imov: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          context.r.at(dst) = context.r.at(src);
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::iadd:
+        case Opcode::isub:
+        case Opcode::imul:
+        case Opcode::idiv:
+        case Opcode::imod:
+        case Opcode::iand:
+        case Opcode::ior:
+        case Opcode::ixor:
+        case Opcode::ishl:
+        case Opcode::ishr:
+        case Opcode::isar: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto lhs_reg = context.module->code.at(cursor++);
+          const auto rhs_reg = context.module->code.at(cursor++);
+          const auto lhs = context.r.at(lhs_reg);
+          const auto rhs = context.r.at(rhs_reg);
+          std::uint64_t result = 0;
+          bool carry = false;
+          bool overflow = false;
+          switch (opcode) {
+            case Opcode::iadd:
+              result = lhs + rhs;
+              carry = lhs > std::numeric_limits<std::uint64_t>::max() - rhs;
+              overflow = overflow_add(static_cast<std::int64_t>(lhs), static_cast<std::int64_t>(rhs), static_cast<std::int64_t>(result));
+              break;
+            case Opcode::isub:
+              result = lhs - rhs;
+              carry = lhs < rhs;
+              overflow = overflow_sub(static_cast<std::int64_t>(lhs), static_cast<std::int64_t>(rhs), static_cast<std::int64_t>(result));
+              break;
+            case Opcode::imul:
+              result = lhs * rhs;
+              break;
+            case Opcode::idiv:
+              if (rhs == 0) throw Vm2DivByZero(instruction_pc, "vm2: divide by zero");
+              result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lhs) / static_cast<std::int64_t>(rhs));
+              break;
+            case Opcode::imod:
+              if (rhs == 0) throw Vm2DivByZero(instruction_pc, "vm2: modulo by zero");
+              result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lhs) % static_cast<std::int64_t>(rhs));
+              break;
+            case Opcode::iand: result = lhs & rhs; break;
+            case Opcode::ior: result = lhs | rhs; break;
+            case Opcode::ixor: result = lhs ^ rhs; break;
+            case Opcode::ishl: result = lhs << (rhs & 63u); break;
+            case Opcode::ishr: result = lhs >> (rhs & 63u); break;
+            case Opcode::isar: result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lhs) >> (rhs & 63u)); break;
+            default: break;
+          }
+          context.r.at(dst) = result;
+          set_predicates_from_value(context, result, carry, overflow);
+          break;
+        }
+        case Opcode::ineg:
+        case Opcode::inot: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          const auto result = opcode == Opcode::ineg ? static_cast<std::uint64_t>(-static_cast<std::int64_t>(context.r.at(src))) : ~context.r.at(src);
+          context.r.at(dst) = result;
+          set_predicates_from_value(context, result);
+          break;
+        }
+        case Opcode::vadd128:
+        case Opcode::vsub128:
+        case Opcode::vmul128:
+        case Opcode::vxor128: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto lhs = context.q.at(context.module->code.at(cursor++));
+          const auto rhs = context.q.at(context.module->code.at(cursor++));
+          Vec128 out{};
+          for (int i = 0; i < 2; ++i) {
+            switch (opcode) {
+              case Opcode::vadd128: out.lanes[static_cast<std::size_t>(i)] = lhs.lanes[static_cast<std::size_t>(i)] + rhs.lanes[static_cast<std::size_t>(i)]; break;
+              case Opcode::vsub128: out.lanes[static_cast<std::size_t>(i)] = lhs.lanes[static_cast<std::size_t>(i)] - rhs.lanes[static_cast<std::size_t>(i)]; break;
+              case Opcode::vmul128: out.lanes[static_cast<std::size_t>(i)] = lhs.lanes[static_cast<std::size_t>(i)] * rhs.lanes[static_cast<std::size_t>(i)]; break;
+              case Opcode::vxor128: out.lanes[static_cast<std::size_t>(i)] = lhs.lanes[static_cast<std::size_t>(i)] ^ rhs.lanes[static_cast<std::size_t>(i)]; break;
+              default: break;
+            }
+          }
+          context.q.at(dst) = out;
+          set_predicates_from_vec(context, out);
+          break;
+        }
+        case Opcode::imemld8:
+        case Opcode::imemld16:
+        case Opcode::imemld32:
+        case Opcode::imemld64: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto base = context.module->code.at(cursor++);
+          const auto offset = read_i32(context.module->code, cursor);
+          const auto address = resolve_address(context, base, offset);
+          switch (opcode) {
+            case Opcode::imemld8: context.r.at(dst) = context.read_memory<std::uint8_t>(address); break;
+            case Opcode::imemld16: context.r.at(dst) = context.read_memory<std::uint16_t>(address); break;
+            case Opcode::imemld32: context.r.at(dst) = context.read_memory<std::uint32_t>(address); break;
+            case Opcode::imemld64: context.r.at(dst) = context.read_memory<std::uint64_t>(address); break;
+            default: break;
+          }
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::imemst8:
+        case Opcode::imemst16:
+        case Opcode::imemst32:
+        case Opcode::imemst64: {
+          const auto base = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          const auto offset = read_i32(context.module->code, cursor);
+          const auto address = resolve_address(context, base, offset);
+          switch (opcode) {
+            case Opcode::imemst8: context.write_memory<std::uint8_t>(address, static_cast<std::uint8_t>(context.r.at(src))); break;
+            case Opcode::imemst16: context.write_memory<std::uint16_t>(address, static_cast<std::uint16_t>(context.r.at(src))); break;
+            case Opcode::imemst32: context.write_memory<std::uint32_t>(address, static_cast<std::uint32_t>(context.r.at(src))); break;
+            case Opcode::imemst64: context.write_memory<std::uint64_t>(address, context.r.at(src)); break;
+            default: break;
+          }
+          break;
+        }
+        case Opcode::vmemld128: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto base = context.module->code.at(cursor++);
+          const auto offset = read_i32(context.module->code, cursor);
+          context.q.at(dst) = context.read_vec128(resolve_address(context, base, offset));
+          set_predicates_from_vec(context, context.q.at(dst));
+          break;
+        }
+        case Opcode::vmemst128: {
+          const auto base = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          const auto offset = read_i32(context.module->code, cursor);
+          context.write_vec128(resolve_address(context, base, offset), context.q.at(src));
+          break;
+        }
+        case Opcode::jmp:
+          context.pc = read_u32(context.module->code, cursor);
+          control_flow_changed = true;
+          break;
+        case Opcode::jp:
+        case Opcode::jnp: {
+          const auto pred = context.module->code.at(cursor++);
+          const auto target = read_u32(context.module->code, cursor);
+          const auto take = opcode == Opcode::jp ? context.p.at(pred) : !context.p.at(pred);
+          context.pc = take ? target : static_cast<std::uint32_t>(cursor);
+          control_flow_changed = true;
+          break;
+        }
+        case Opcode::blnk: {
+          const auto target = read_u32(context.module->code, cursor);
+          const auto arg_count = context.module->code.at(cursor++);
+          enter_call(context, target, arg_count, static_cast<std::uint32_t>(cursor));
+          control_flow_changed = true;
+          break;
+        }
+        case Opcode::bret:
+          leave_call(context, halted);
+          control_flow_changed = true;
+          break;
+        case Opcode::pcall: {
+          const auto pred = context.module->code.at(cursor++);
+          const auto target = read_u32(context.module->code, cursor);
+          const auto arg_count = context.module->code.at(cursor++);
+          if (context.p.at(pred)) {
+            enter_call(context, target, arg_count, static_cast<std::uint32_t>(cursor));
+            control_flow_changed = true;
+          }
+          break;
+        }
+        case Opcode::pret:
+          if (context.p[0]) {
+            leave_call(context, halted);
+            control_flow_changed = true;
+          }
+          break;
+        case Opcode::xcall: {
+          const auto domain = context.module->code.at(cursor++);
+          const auto id = read_u32(context.module->code, cursor);
+          const auto int_count = context.module->code.at(cursor++);
+          const auto float_count = context.module->code.at(cursor++);
+          const auto opaque_count = context.module->code.at(cursor++);
+          if (context.bridge_registry == nullptr) throw Vm2Exception(instruction_pc, "vm2: bridge registry not configured");
+          vmp::runtime::bridge::DomainCallArgs args;
+          for (std::uint8_t i = 0; i < int_count; ++i) {
+            if (i < 8) {
+              args.ints.push_back(context.r[i]);
+            } else {
+              args.ints.push_back(context.read_memory<std::uint64_t>(context.sp + static_cast<std::uint64_t>((i - 8) * 8)));
+            }
+          }
+          for (std::uint8_t i = 0; i < float_count; ++i) {
+            args.floats.push_back(i < kVm2FloatRegisterCount ? context.d[i] : 0.0);
+          }
+          for (std::uint8_t i = 0; i < opaque_count; ++i) {
+            args.opaque.push_back(reinterpret_cast<void*>(static_cast<std::uintptr_t>(context.r[i])));
+          }
+          const auto result = context.bridge_registry->call(bridge_domain_from_byte(domain), id, args, context.max_bridge_depth);
+          context.r[0] = result.ret_int;
+          context.d[0] = result.ret_float;
+          set_predicates_from_value(context, result.ret_int);
+          break;
+        }
+        case Opcode::xret:
+          leave_call(context, halted);
+          control_flow_changed = true;
+          break;
+        case Opcode::tsload: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto id = read_u32(context.module->code, cursor);
+          context.r.at(dst) = context.materialize_transient_string(id);
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::tsrelease: {
+          const auto src = context.module->code.at(cursor++);
+          context.release_transient_string(context.r.at(src));
+          context.r.at(src) = 0;
+          set_predicates_from_value(context, 0);
+          break;
+        }
+        default:
+          context.pc = instruction_pc;
+          dispatch_audit(context, "vm2_unknown_opcode", "unknown opcode");
+          throw Vm2UnknownOpcode(instruction_pc, "vm2: unknown opcode");
+      }
+      if (!halted && !control_flow_changed) context.pc = static_cast<std::uint32_t>(cursor);
+    }
+    return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+  } catch (const Vm2StackOverflow&) {
+    dispatch_audit(context, "vm2_stack_overflow", "stack overflow");
+    context.clear_all_transient_strings();
+    throw;
+  } catch (const Vm2UnknownOpcode&) {
+    context.clear_all_transient_strings();
+    throw;
+  } catch (...) {
+    context.clear_all_transient_strings();
+    throw;
+  }
+}
+
+}  // namespace vmp::runtime::vm2
+
+namespace vmp::runtime::bridge {
+
+void BridgeRegistry::register_vm2(std::uint32_t id, vmp::runtime::vm2::Vm2Module* module) {
+  vm2_handlers_[id] = [module](const DomainCallArgs& args, BridgeRegistry* registry, int max_depth) -> DomainCallResult {
+    if (module == nullptr) throw BridgeException("bridge: vm2 module not found");
+    vmp::runtime::vm2::Vm2Context context(*module);
+    context.bridge_registry = registry;
+    context.max_bridge_depth = max_depth;
+    for (std::size_t i = 0; i < args.ints.size() && i < 8; ++i) context.r[i] = args.ints[i];
+    for (std::size_t i = 0; i < args.floats.size() && i < vmp::runtime::vm2::kVm2FloatRegisterCount; ++i) context.d[i] = args.floats[i];
+    for (std::size_t i = 0; i < args.opaque.size() && i < 8; ++i) context.r[i] = reinterpret_cast<std::uintptr_t>(args.opaque[i]);
+    const std::size_t spill_count = args.ints.size() > 8 ? args.ints.size() - 8 : 0u;
+    if (spill_count > 0) {
+      const auto spill_base = context.allocate_spill(spill_count * sizeof(std::uint64_t), "bridge spill");
+      for (std::size_t i = 0; i < spill_count; ++i) {
+        context.write_memory<std::uint64_t>(spill_base + static_cast<std::uint64_t>(i * sizeof(std::uint64_t)), args.ints[8 + i]);
+      }
+    }
+    vmp::runtime::vm2::Vm2Interpreter interpreter;
+    const auto result = interpreter.execute(context);
+    return DomainCallResult{result.ret_int, result.ret_float, 0};
+  };
+}
+
+}  // namespace vmp::runtime::bridge

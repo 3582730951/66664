@@ -478,3 +478,52 @@
   - `cd /workspace/vmp && cargo run -p vmp-rust-collect -- --target-dir target --policy-out /tmp/demo_sample_policy.json && python3 tests/bindings_rust/compare_policy_json.py /tmp/demo_sample_policy.json tests/bindings_rust/expected.json`：通过，输出 `policy json equal`。
   - `cd /workspace/vmp && build/tools/vmp-protect --policy tests/bindings_rust/base_policy.json --rust-target-dir target --emit-policy-json /tmp/demo_sample_merged.json --validate-only && python3 tests/bindings_rust/compare_policy_json.py /tmp/demo_sample_merged.json tests/bindings_rust/expected.json`：通过，输出 `policy json equal`。
   - clean-copy `/tmp` 回放：复制到 `/tmp/vmp-sub07-replay`（排除 `.git` / `build*` / `target` / `Cargo.lock`），随后 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace && cargo build -p demo_sample && cargo run -p vmp-rust-collect -- --target-dir target --policy-out /tmp/vmp_sub07_policy.json && build/tools/vmp-protect --policy tests/bindings_rust/base_policy.json --rust-target-dir target --emit-policy-json /tmp/vmp_sub07_merged.json --validate-only`：通过，输出 `TMP_REPLAY_OK`。
+
+### subtask_08
+- 本轮清单：
+  - 实现 VM2 独立 ISA / 模块容器：`VMP2` magic、2-byte opcode、`r/q/d/p + pc/sp/lr`、独立 `key_context_id[16]`、128KiB downward private stack、与 VM1 不兼容的 handler identity。
+  - 实现 `Vm2Context` / `Vm2Interpreter`：整数/向量算术、load/store、`blnk/bret`、`pcall/pret`、`xcall/xret`、`tsload/tsrelease`、异常族 `Vm2Exception/Vm2DivByZero/Vm2StackOverflow/Vm2UnknownOpcode`、audit 事件映射。
+  - 扩展跨域桥接：`BridgeRegistry::register_vm2(...)` 与 `native↔vm2` / `vm1↔vm2` / `vm2↔vm2` 双向调用，保留共享 `max_depth=64` 默认值。
+  - 接通 VM2 字符串句柄：`Vm2Context` 持有独立 `KeyContext` / `StringPool`，`tsload` 按 `key_context_id` 校验，`bret/xret/异常` 自动擦除未释放 handle。
+  - 新增 VM2 DSL / CLI：`runtime/vm2/asm/README.md`、`vmp-vm2-asm`、`vmp-vm2-run`。
+  - 新增 `tests/runtime_vm2/` 真测与 `fib20.vm2s` fixture，并接入 CTest。
+  - 更新 `runtime/vm2/README.md` 与 Rust placeholder 字样，确保本轮新增文件无 `NOT_IMPLEMENTED`。
+- 变更文件：
+  - `runtime/vm1/include/vmp/runtime/bridge/bridge.h`
+  - `runtime/vm1/include/vmp/runtime/vm1/vm1.h`
+  - `runtime/vm1/src/bridge.cpp`
+  - `runtime/vm1/src/vm1.cpp`
+  - `runtime/vm2/CMakeLists.txt`
+  - `runtime/vm2/README.md`
+  - `runtime/vm2/asm/README.md`
+  - `runtime/vm2/include/vmp/runtime/vm2/isa.h`
+  - `runtime/vm2/include/vmp/runtime/vm2/vm2.h`
+  - `runtime/vm2/rust_vm2/src/lib.rs`
+  - `runtime/vm2/src/interpreter.cpp`
+  - `runtime/vm2/src/vm2.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/runtime_vm2/test_common.h`
+  - `tests/runtime_vm2/vm2_asm_round_trip.cpp`
+  - `tests/runtime_vm2/vm2_arith_ops.cpp`
+  - `tests/runtime_vm2/vm2_control_flow.cpp`
+  - `tests/runtime_vm2/vm2_calling_convention.cpp`
+  - `tests/runtime_vm2/vm2_cross_domain.cpp`
+  - `tests/runtime_vm2/vm2_exceptions.cpp`
+  - `tests/runtime_vm2/vm2_breakpoint_event.cpp`
+  - `tests/runtime_vm2/vm2_string_integration.cpp`
+  - `tests/runtime_vm2/isa_isolation.cpp`
+  - `tests/runtime_vm2/fixtures/fib20.vm2s`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_vm2_asm.cpp`
+  - `tools/src/vmp_vm2_run.cpp`
+- 未完成项：
+  - 本轮要求范围内无未完成项。
+- 下一子任务建议：
+  - 若继续 runtime 方向，可进入 VM2 JIT（subtask 11）或后续 loader / planner 对接，让 Protection Plan 真正分配 VM1/VM2。
+- 验证：
+  - `cd /workspace/vmp && cmake --build build -j`：通过。
+  - `cd /workspace/vmp && ctest --test-dir build --output-on-failure`：`55/55` 通过。
+  - `cd /workspace/vmp && cargo test --workspace`：通过。
+  - `cd /workspace/vmp && ./build/tools/vmp-vm2-asm tests/runtime_vm2/fixtures/fib20.vm2s /tmp/fib20.vm2 && ./build/tools/vmp-vm2-run /tmp/fib20.vm2 20`：输出 `ret_int=6765`。
+  - `cd /workspace/vmp && rg -n "NOT_IMPLEMENTED" runtime/vm2 tools/src/vmp_vm2_asm.cpp tools/src/vmp_vm2_run.cpp tests/runtime_vm2`：无输出。
+  - clean-copy `/tmp` 回放：复制到 `/tmp/vmp-sub08-replay`（排除 `.git` / `build*` / `target` / `Cargo.lock` / `passwd.txt` / `OUT_DIR`），随后 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`：通过。

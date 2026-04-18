@@ -271,3 +271,69 @@ add_test(NAME vmp_vm1_run_fib20
 set_tests_properties(vmp_vm1_run_fib20 PROPERTIES
   DEPENDS vmp_vm1_asm_fib20
   PASS_REGULAR_EXPRESSION "ret_int=6765")
+
+# runtime/vm2 tests
+add_executable(vm2_asm_round_trip ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_asm_round_trip.cpp)
+target_link_libraries(vm2_asm_round_trip PRIVATE vmp_runtime_vm2 vmp_runtime_audit)
+set_target_properties(vm2_asm_round_trip PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vm2_arith_ops ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_arith_ops.cpp)
+target_link_libraries(vm2_arith_ops PRIVATE vmp_runtime_vm2 vmp_runtime_audit)
+set_target_properties(vm2_arith_ops PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vm2_control_flow ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_control_flow.cpp)
+target_link_libraries(vm2_control_flow PRIVATE vmp_runtime_vm2 vmp_runtime_audit)
+set_target_properties(vm2_control_flow PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vm2_calling_convention ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_calling_convention.cpp)
+target_link_libraries(vm2_calling_convention PRIVATE vmp_runtime_vm2 vmp_runtime_audit)
+set_target_properties(vm2_calling_convention PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vm2_cross_domain ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_cross_domain.cpp)
+target_link_libraries(vm2_cross_domain PRIVATE vmp_runtime_vm2 vmp_runtime_vm1 vmp_runtime_audit)
+set_target_properties(vm2_cross_domain PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vm2_exceptions ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_exceptions.cpp)
+target_link_libraries(vm2_exceptions PRIVATE vmp_runtime_vm2 vmp_runtime_audit)
+set_target_properties(vm2_exceptions PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vm2_breakpoint_event ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_breakpoint_event.cpp)
+target_link_libraries(vm2_breakpoint_event PRIVATE vmp_runtime_vm2 vmp_runtime_audit)
+set_target_properties(vm2_breakpoint_event PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vm2_string_integration ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/vm2_string_integration.cpp)
+target_link_libraries(vm2_string_integration PRIVATE vmp_runtime_vm2 vmp_runtime_strings vmp_runtime_audit)
+set_target_properties(vm2_string_integration PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(isa_isolation ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/isa_isolation.cpp)
+target_link_libraries(isa_isolation PRIVATE vmp_runtime_vm2 vmp_runtime_vm1 vmp_runtime_audit)
+set_target_properties(isa_isolation PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_test(NAME vm2_asm_round_trip COMMAND $<TARGET_FILE:vm2_asm_round_trip>)
+set_tests_properties(vm2_asm_round_trip PROPERTIES PASS_REGULAR_EXPRESSION "vm2_asm_round_trip OK")
+add_test(NAME vm2_arith_ops COMMAND $<TARGET_FILE:vm2_arith_ops>)
+set_tests_properties(vm2_arith_ops PROPERTIES PASS_REGULAR_EXPRESSION "vm2_arith_ops OK")
+add_test(NAME vm2_control_flow COMMAND $<TARGET_FILE:vm2_control_flow>)
+set_tests_properties(vm2_control_flow PROPERTIES PASS_REGULAR_EXPRESSION "vm2_control_flow OK")
+add_test(NAME vm2_calling_convention COMMAND $<TARGET_FILE:vm2_calling_convention>)
+set_tests_properties(vm2_calling_convention PROPERTIES PASS_REGULAR_EXPRESSION "vm2_calling_convention OK")
+add_test(NAME vm2_cross_domain COMMAND $<TARGET_FILE:vm2_cross_domain>)
+set_tests_properties(vm2_cross_domain PROPERTIES PASS_REGULAR_EXPRESSION "vm2_cross_domain OK")
+add_test(NAME vm2_exceptions COMMAND $<TARGET_FILE:vm2_exceptions>)
+set_tests_properties(vm2_exceptions PROPERTIES PASS_REGULAR_EXPRESSION "vm2_exceptions OK")
+add_test(NAME vm2_breakpoint_event COMMAND $<TARGET_FILE:vm2_breakpoint_event>)
+set_tests_properties(vm2_breakpoint_event PROPERTIES PASS_REGULAR_EXPRESSION "vm2_breakpoint_event OK")
+add_test(NAME vm2_string_integration COMMAND $<TARGET_FILE:vm2_string_integration>)
+set_tests_properties(vm2_string_integration PROPERTIES PASS_REGULAR_EXPRESSION "vm2_string_integration OK")
+add_test(NAME isa_isolation COMMAND $<TARGET_FILE:isa_isolation>)
+set_tests_properties(isa_isolation PROPERTIES PASS_REGULAR_EXPRESSION "isa_isolation OK")
+
+add_test(NAME vmp_vm2_asm_fib20
+  COMMAND $<TARGET_FILE:vmp-vm2-asm> ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2/fixtures/fib20.vm2s ${CMAKE_BINARY_DIR}/tests/fib20.vm2)
+set_tests_properties(vmp_vm2_asm_fib20 PROPERTIES PASS_REGULAR_EXPRESSION "assembled")
+
+add_test(NAME vmp_vm2_run_fib20
+  COMMAND $<TARGET_FILE:vmp-vm2-run> ${CMAKE_BINARY_DIR}/tests/fib20.vm2 20)
+set_tests_properties(vmp_vm2_run_fib20 PROPERTIES
+  DEPENDS vmp_vm2_asm_fib20
+  PASS_REGULAR_EXPRESSION "ret_int=6765")

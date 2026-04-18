@@ -11,6 +11,9 @@
 namespace vmp::runtime::vm1 {
 class Vm1Module;
 }
+namespace vmp::runtime::vm2 {
+class Vm2Module;
+}
 
 namespace vmp::runtime::bridge {
 
@@ -47,6 +50,7 @@ class BridgeRegistry {
  public:
   void register_native(std::uint32_t id, std::function<DomainCallResult(const DomainCallArgs&)> fn);
   void register_vm1(std::uint32_t id, vmp::runtime::vm1::Vm1Module* module);
+  void register_vm2(std::uint32_t id, vmp::runtime::vm2::Vm2Module* module);
   DomainCallResult call(Domain target, std::uint32_t id, const DomainCallArgs& args, int max_depth = 64);
 
   std::shared_ptr<DomainCallException> last_domain_exception() const;
@@ -55,6 +59,7 @@ class BridgeRegistry {
  private:
   std::unordered_map<std::uint32_t, std::function<DomainCallResult(const DomainCallArgs&)>> native_handlers_;
   std::unordered_map<std::uint32_t, vmp::runtime::vm1::Vm1Module*> vm1_handlers_;
+  std::unordered_map<std::uint32_t, std::function<DomainCallResult(const DomainCallArgs&, BridgeRegistry*, int)>> vm2_handlers_;
 };
 
 }  // namespace vmp::runtime::bridge

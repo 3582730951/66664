@@ -36,3 +36,11 @@ set_target_properties(vmp-vm1-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BI
 add_executable(vmp-vm1-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm1_run.cpp)
 target_link_libraries(vmp-vm1-run PRIVATE vmp_runtime_vm1 vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
 set_target_properties(vmp-vm1-run PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+
+add_executable(vmp-vm2-asm ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm2_asm.cpp)
+target_link_libraries(vmp-vm2-asm PRIVATE vmp_runtime_vm2)
+set_target_properties(vmp-vm2-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+
+add_executable(vmp-vm2-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm2_run.cpp)
+target_link_libraries(vmp-vm2-run PRIVATE vmp_runtime_vm2 vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
+set_target_properties(vmp-vm2-run PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)

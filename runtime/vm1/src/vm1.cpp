@@ -1113,6 +1113,12 @@ std::string disassemble_module(const Vm1Module& module) {
   return out.str();
 }
 
+namespace {
+inline constexpr int kVm1HandlerTableIdentity = 0x56314D31;
+}
+
+const void* handler_table_identity() noexcept { return &kVm1HandlerTableIdentity; }
+
 const char* Facade::status() const noexcept { return "vm1_ready"; }
 
 }  // namespace vmp::runtime::vm1

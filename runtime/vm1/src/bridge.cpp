@@ -74,8 +74,13 @@ DomainCallResult BridgeRegistry::call(Domain target, std::uint32_t id, const Dom
         const auto result = interpreter.execute(context);
         return DomainCallResult{result.ret_int, result.ret_float, 0};
       }
-      case Domain::vm2:
-        throw BridgeException("bridge: vm2 not available in subtask_05");
+      case Domain::vm2: {
+        const auto it = vm2_handlers_.find(id);
+        if (it == vm2_handlers_.end()) {
+          throw BridgeException("bridge: vm2 module not found");
+        }
+        return it->second(args, this, max_depth);
+      }
     }
   } catch (const BridgeException&) {
     throw;

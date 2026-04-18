@@ -1,0 +1,18 @@
+  blnk @fib, 1
+  bret
+fib:
+  ildimm r10, 2
+  isub r11, r0, r10
+  jp p1, @base
+  imov r20, r0
+  ildimm r10, 1
+  isub r0, r20, r10
+  blnk @fib, 1
+  imov r21, r0
+  ildimm r10, 2
+  isub r0, r20, r10
+  blnk @fib, 1
+  iadd r0, r21, r0
+  bret
+base:
+  bret

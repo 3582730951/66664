@@ -148,6 +148,7 @@ class Vm1Interpreter {
 Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags = 0);
 std::string disassemble_module(const Vm1Module& module);
 std::string opcode_name(Opcode opcode);
+const void* handler_table_identity() noexcept;
 
 struct Facade {
   const char* status() const noexcept;
