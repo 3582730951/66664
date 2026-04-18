@@ -378,6 +378,23 @@ if(UNIX AND NOT APPLE)
   add_test(NAME loader_linux_shared_lib_preload_check
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_audit_log.py ${VMP_LOADER_PRELOAD_LOG} loader_init)
   set_tests_properties(loader_linux_shared_lib_preload_check PROPERTIES DEPENDS loader_linux_shared_lib_preload PASS_REGULAR_EXPRESSION "audit log OK")
+  add_executable(loader_capability_gate_disallow ${CMAKE_CURRENT_SOURCE_DIR}/loader/loader_capability_gate_disallow.cpp)
+  target_link_libraries(loader_capability_gate_disallow PRIVATE vmp_loader_linux vmp_runtime_vm1 vmp_runtime_state vmp_runtime_audit vmp_runtime_strings)
+  target_compile_definitions(loader_capability_gate_disallow PRIVATE VMP_LOADER_SELFTEST_PATH="$<TARGET_FILE:vmp-loader-selftest>")
+  set_target_properties(loader_capability_gate_disallow PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+  add_test(NAME loader_capability_gate_disallow COMMAND $<TARGET_FILE:loader_capability_gate_disallow>)
+  set_tests_properties(loader_capability_gate_disallow PROPERTIES PASS_REGULAR_EXPRESSION "loader_capability_gate_disallow OK")
+
+  find_package(JNI QUIET)
+  if(JNI_FOUND)
+    add_library(loader_android_jni_onload_probe SHARED ${CMAKE_CURRENT_SOURCE_DIR}/loader/loader_android_jni_onload_link_probe.cpp)
+    target_include_directories(loader_android_jni_onload_probe PRIVATE ${JNI_INCLUDE_DIRS})
+    target_link_libraries(loader_android_jni_onload_probe PRIVATE vmp_loader_android)
+    set_target_properties(loader_android_jni_onload_probe PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests OUTPUT_NAME loader_android_jni_onload_probe)
+    add_test(NAME loader_android_jni_onload_link_probe
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_nm_symbol.py ${CMAKE_NM} $<TARGET_FILE:loader_android_jni_onload_probe> JNI_OnLoad)
+    set_tests_properties(loader_android_jni_onload_link_probe PROPERTIES PASS_REGULAR_EXPRESSION "nm symbol OK")
+  endif()
 endif()
 
 if(WIN32)

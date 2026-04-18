@@ -7,3 +7,5 @@ struct LoaderFacade {
 };
 
 }  // namespace vmp::loader::ios
+
+extern "C" void vmp_ios_init(void);

@@ -24,6 +24,7 @@
 #endif
 
 #include <vmp/runtime/audit/audit.h>
+#include <vmp/runtime/state/state.h>
 #include <vmp/runtime/vm1/isa.h>
 #include <vmp/runtime/vm1/vm1.h>
 
@@ -331,6 +332,7 @@ struct MmapRegion {
 }  // namespace
 
 struct Vm1Jit::Impl {
+  bool capability_event_emitted = false;
   struct ModuleCache;
 
   struct TraceCandidate {
@@ -441,6 +443,35 @@ struct Vm1Jit::Impl {
       return;
     }
     audit->append(vmp::runtime::audit::make_event(event_type, note, pc, "vm1_jit", "", 0));
+  }
+
+  bool c_backend_available() const {
+#if defined(_WIN32)
+    return false;
+#else
+    const char* path_env = std::getenv("PATH");
+    if (path_env == nullptr || *path_env == '\0') {
+      return false;
+    }
+    std::string path_list(path_env);
+    std::size_t start = 0;
+    while (start <= path_list.size()) {
+      const auto end = path_list.find(':', start);
+      const auto item = path_list.substr(start, end == std::string::npos ? std::string::npos : end - start);
+      if (!item.empty()) {
+        std::error_code ec;
+        auto candidate = std::filesystem::path(item) / "cc";
+        if (std::filesystem::exists(candidate, ec) && !ec) {
+          return true;
+        }
+      }
+      if (end == std::string::npos) {
+        break;
+      }
+      start = end + 1;
+    }
+    return false;
+#endif
   }
 
   ModuleCache& module_cache(std::uint64_t module_id) {
@@ -609,7 +640,17 @@ struct Vm1Jit::Impl {
   }
 
   Entry compile_entry(const Vm1Module& module, std::uint32_t start_pc, const std::vector<std::uint32_t>& pcs, bool trace) {
-    const auto requested = parse_backend_env();
+    auto requested = parse_backend_env();
+    const auto& runtime_state = vmp::runtime::state::RuntimeState::instance();
+    if (runtime_state.jit_execmem_unavailable()) {
+      if (runtime_state.config().platform == "ios") {
+        requested = Vm1JitBackend::off;
+      } else if (c_backend_available()) {
+        requested = Vm1JitBackend::c;
+      } else {
+        requested = Vm1JitBackend::off;
+      }
+    }
     if (requested == Vm1JitBackend::off) {
       throw std::runtime_error("jit: backend disabled");
     }
@@ -641,9 +682,40 @@ Vm1Jit::Vm1Jit() : impl_(new Impl{}) {
 
 Vm1Jit::~Vm1Jit() { delete impl_; }
 
+Vm1JitBackend Vm1Jit::backend_requested() const {
+  const auto requested = parse_backend_env();
+  const auto& runtime_state = vmp::runtime::state::RuntimeState::instance();
+  if (!runtime_state.jit_execmem_unavailable()) {
+    return requested;
+  }
+
+  const auto platform = runtime_state.config().platform;
+  if (platform == "ios") {
+    if (!impl_->capability_event_emitted) {
+      impl_->emit_audit("jit_execmem_unavailable", "ios capability gate forced interpreter-only path");
+      impl_->capability_event_emitted = true;
+    }
+    return Vm1JitBackend::off;
+  }
+
+  if (impl_->c_backend_available()) {
+    if (!impl_->capability_event_emitted) {
+      impl_->emit_audit("jit_execmem_unavailable", "execmem unavailable; downgrading vm1 JIT to c backend");
+      impl_->capability_event_emitted = true;
+    }
+    return Vm1JitBackend::c;
+  }
+
+  if (!impl_->capability_event_emitted) {
+    impl_->emit_audit("jit_execmem_unavailable", "execmem unavailable and c backend missing; interpreter-only fallback");
+    impl_->capability_event_emitted = true;
+  }
+  return Vm1JitBackend::off;
+}
+
 Vm1JitBackend Vm1Jit::selected_backend() const {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  return parse_backend_env();
+  return backend_requested();
 }
 
 std::string Vm1Jit::selected_backend_name() const { return backend_name(selected_backend()); }
@@ -668,7 +740,7 @@ std::size_t Vm1Jit::module_cache_budget_bytes() const {
 JitEntry Vm1Jit::compile_if_needed(const Vm1Module& module, std::uint32_t block_start_pc, std::uint64_t hit_count) {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   impl_->refresh_config_from_env();
-  if (parse_backend_env() == Vm1JitBackend::off) {
+  if (backend_requested() == Vm1JitBackend::off) {
     return nullptr;
   }
   auto& cache = impl_->module_cache(module.id());
@@ -715,7 +787,7 @@ void Vm1Jit::record_trace_observation(const Vm1Module& module, const std::vector
   }
   std::lock_guard<std::mutex> lock(impl_->mutex);
   impl_->refresh_config_from_env();
-  if (parse_backend_env() == Vm1JitBackend::off) {
+  if (backend_requested() == Vm1JitBackend::off) {
     return;
   }
   auto& cache = impl_->module_cache(module.id());
@@ -814,6 +886,7 @@ std::size_t Vm1Jit::module_cache_bytes(std::uint64_t module_id) const {
 void Vm1Jit::reset_for_tests() {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   impl_->modules.clear();
+  impl_->capability_event_emitted = false;
   impl_->refresh_config_from_env();
 }
 

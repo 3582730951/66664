@@ -3,5 +3,5 @@ plugins {
     kotlin("android") version "1.9.24" apply false
 }
 
-// NOT_IMPLEMENTED: placeholder Gradle integration for loader/android.
-// Intended future use: externalNativeBuild + CMake integration with the native runtime skeleton.
+// Placeholder Gradle entrypoint for future externalNativeBuild wiring.
+// The authoritative native build currently lives in the repository CMake/NDK flow.

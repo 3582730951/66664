@@ -2,7 +2,7 @@
 
 - 对应 plan：§2.6、§15
 - 范围：平台 loader / lifecycle hooks 真实初始化入口
-- 当前状态：linux/windows ready，android/ios pending
+- 当前状态：linux/windows/android/ios ready
 
 ## 初始化目标
 在任何受保护代码运行前完成以下动作：
@@ -15,8 +15,10 @@
 - `VMP_STRING_MASTER_KEY`：十六进制主密钥，供字符串运行时派生子密钥
 - `VMP_AUDIT_PATH`：覆盖默认审计路径
 - `VMP_DISABLE_LOADER`：非空即禁用 loader（测试/宿主环境使用）
+- `VMP_FORCE_JIT_CAPABILITY=disallow`：强制 capability gate 判定 execmem 不可用
 
 ## 平台入口
 - Linux：`constructor(101)` + `.init_array` 显式 fallback
 - Windows：TLS callback（`.CRT$XLB`）+ DllMain 风格桥接
-- Android/iOS：后续子任务补齐
+- Android：`JNI_OnLoad` + `constructor(101)`
+- iOS：`constructor` + capability gate

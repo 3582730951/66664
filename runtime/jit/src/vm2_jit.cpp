@@ -26,6 +26,7 @@
 #endif
 
 #include <vmp/runtime/audit/audit.h>
+#include <vmp/runtime/state/state.h>
 #include <vmp/runtime/strings/cipher.h>
 #include <vmp/runtime/strings/keyctx.h>
 #include <vmp/runtime/vm2/vm2.h>
@@ -484,6 +485,7 @@ void write_u64(std::uint8_t*& out, std::uint64_t value) {
 }  // namespace
 
 struct Vm2Jit::Impl {
+  bool capability_event_emitted = false;
   struct Entry {
     std::uint32_t entry_pc = 0;
     std::vector<std::uint32_t> blocks;
@@ -533,6 +535,35 @@ struct Vm2Jit::Impl {
       return;
     }
     audit->append(vmp::runtime::audit::make_event(event_type, note, pc, "vm2_jit", "", 0));
+  }
+
+  bool c_backend_available() const {
+#if defined(_WIN32)
+    return false;
+#else
+    const char* path_env = std::getenv("PATH");
+    if (path_env == nullptr || *path_env == '\0') {
+      return false;
+    }
+    std::string path_list(path_env);
+    std::size_t start = 0;
+    while (start <= path_list.size()) {
+      const auto end = path_list.find(':', start);
+      const auto item = path_list.substr(start, end == std::string::npos ? std::string::npos : end - start);
+      if (!item.empty()) {
+        std::error_code ec;
+        auto candidate = std::filesystem::path(item) / "cc";
+        if (std::filesystem::exists(candidate, ec) && !ec) {
+          return true;
+        }
+      }
+      if (end == std::string::npos) {
+        break;
+      }
+      start = end + 1;
+    }
+    return false;
+#endif
   }
 
   ModuleCache& module_cache(std::uint64_t module_id) {
@@ -724,7 +755,17 @@ struct Vm2Jit::Impl {
                       const Vm2Context& context,
                       std::uint32_t entry_pc,
                       const std::vector<std::uint32_t>& blocks) {
-    const auto requested = parse_backend_env();
+    auto requested = parse_backend_env();
+    const auto& runtime_state = vmp::runtime::state::RuntimeState::instance();
+    if (runtime_state.jit_execmem_unavailable()) {
+      if (runtime_state.config().platform == "ios") {
+        requested = Vm2JitBackend::off;
+      } else if (c_backend_available()) {
+        requested = Vm2JitBackend::c;
+      } else {
+        requested = Vm2JitBackend::off;
+      }
+    }
     if (requested == Vm2JitBackend::off) {
       throw std::runtime_error("vm2_jit: backend disabled");
     }
@@ -756,9 +797,40 @@ Vm2Jit::Vm2Jit() : impl_(new Impl{}) {
 
 Vm2Jit::~Vm2Jit() { delete impl_; }
 
+Vm2JitBackend Vm2Jit::backend_requested() const {
+  const auto requested = parse_backend_env();
+  const auto& runtime_state = vmp::runtime::state::RuntimeState::instance();
+  if (!runtime_state.jit_execmem_unavailable()) {
+    return requested;
+  }
+
+  const auto platform = runtime_state.config().platform;
+  if (platform == "ios") {
+    if (!impl_->capability_event_emitted) {
+      impl_->emit_audit("jit_execmem_unavailable", "ios capability gate forced interpreter-only path");
+      impl_->capability_event_emitted = true;
+    }
+    return Vm2JitBackend::off;
+  }
+
+  if (impl_->c_backend_available()) {
+    if (!impl_->capability_event_emitted) {
+      impl_->emit_audit("jit_execmem_unavailable", "execmem unavailable; downgrading vm2 JIT to c backend");
+      impl_->capability_event_emitted = true;
+    }
+    return Vm2JitBackend::c;
+  }
+
+  if (!impl_->capability_event_emitted) {
+    impl_->emit_audit("jit_execmem_unavailable", "execmem unavailable and c backend missing; interpreter-only fallback");
+    impl_->capability_event_emitted = true;
+  }
+  return Vm2JitBackend::off;
+}
+
 Vm2JitBackend Vm2Jit::selected_backend() const {
   std::lock_guard<std::mutex> lock(impl_->mutex);
-  return parse_backend_env();
+  return backend_requested();
 }
 
 std::string Vm2Jit::selected_backend_name() const { return backend_name(selected_backend()); }
@@ -786,7 +858,7 @@ Vm2JitEntry Vm2Jit::compile_if_needed(const Vm2Module& module,
                                       std::uint64_t hit_count) {
   std::lock_guard<std::mutex> lock(impl_->mutex);
   impl_->refresh_config_from_env();
-  if (parse_backend_env() == Vm2JitBackend::off || hit_count < impl_->config.function_hot_threshold) {
+  if (backend_requested() == Vm2JitBackend::off || hit_count < impl_->config.function_hot_threshold) {
     return nullptr;
   }
   auto& cache = impl_->module_cache(module.id());
@@ -1000,6 +1072,7 @@ bool Vm2Jit::debug_patch_code_byte(std::uint64_t module_id, std::uint32_t entry_
 void Vm2Jit::reset_for_tests() {
   invalidate_all();
   std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->capability_event_emitted = false;
   impl_->refresh_config_from_env();
 }
 

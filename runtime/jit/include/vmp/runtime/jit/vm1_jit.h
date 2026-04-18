@@ -76,6 +76,9 @@ class Vm1Jit {
   void reset_for_tests();
 
  private:
+  Vm1JitBackend backend_requested() const;
+
+ private:
   Vm1Jit();
   ~Vm1Jit();
 

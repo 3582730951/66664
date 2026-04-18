@@ -3,12 +3,12 @@
 #if defined(__linux__)
 
 #include <cstdlib>
-#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include <vmp/loader/common/platform_caps.h>
 #include <vmp/runtime/audit/audit.h>
 #include <vmp/runtime/audit/placeholder.h>
 #include <vmp/runtime/state/state.h>
@@ -19,6 +19,7 @@ namespace {
 
 using vmp::runtime::audit::AnalysisEventRecord;
 using vmp::runtime::audit::AuditWriter;
+namespace common = vmp::loader::common;
 namespace state = vmp::runtime::state;
 namespace strings = vmp::runtime::strings;
 
@@ -31,13 +32,6 @@ bool env_enabled(const char* name) noexcept {
   return value != nullptr && *value != '\0';
 }
 
-std::filesystem::path resolve_audit_path() {
-  if (const char* override_path = std::getenv("VMP_AUDIT_PATH"); override_path != nullptr && *override_path != '\0') {
-    return std::filesystem::path(override_path);
-  }
-  return AuditWriter::default_path();
-}
-
 std::vector<std::uint8_t> fixed_loader_salt() {
   return std::vector<std::uint8_t>{
       0x76, 0x6d, 0x70, 0x2d, 0x6c, 0x69, 0x6e, 0x75,
@@ -45,7 +39,7 @@ std::vector<std::uint8_t> fixed_loader_salt() {
 }
 
 void append_event(AuditWriter& writer, std::string event_type, std::string note) noexcept {
-  AnalysisEventRecord record = vmp::runtime::audit::make_event(std::move(event_type), std::move(note));
+  AnalysisEventRecord record = vmp::runtime::audit::make_event(std::move(event_type), std::move(note), 0, "", "", 0, "", "linux");
   writer.append(record);
   writer.flush();
 }
@@ -67,14 +61,19 @@ void perform_linux_init() {
     return;
   }
 
-  const auto audit_path = resolve_audit_path();
-  g_audit = std::make_unique<AuditWriter>(audit_path);
+  g_audit = std::make_unique<AuditWriter>(common::detect_default_audit_path("linux"));
 
   state::RuntimeConfig config;
   config.platform = "linux";
   config.loader_entrypoint = ".init_array/constructor(101)";
   config.loader_disabled = false;
   state::RuntimeState::instance().init_once(g_audit.get(), config);
+
+  const bool execmem_available = common::detect_execmem_available();
+  state::RuntimeState::instance().set_jit_capability(!execmem_available);
+  if (!execmem_available) {
+    append_event(*g_audit, "jit_execmem_unavailable", "linux loader capability gate downgraded JIT backend");
+  }
 
   append_event(*g_audit, "loader_init", "linux_loader_ctor");
   load_key_context_if_present();
@@ -88,7 +87,7 @@ void record_init_failure(const std::string& note) noexcept {
       return;
     }
     if (!g_audit) {
-      g_audit = std::make_unique<AuditWriter>(resolve_audit_path());
+      g_audit = std::make_unique<AuditWriter>(common::detect_default_audit_path("linux"));
     }
     append_event(*g_audit, "loader_init_failure", note);
   } catch (...) {

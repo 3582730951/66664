@@ -90,6 +90,9 @@ class Vm2Jit {
   void reset_for_tests();
 
  private:
+  Vm2JitBackend backend_requested() const;
+
+ private:
   Vm2Jit();
   ~Vm2Jit();
 

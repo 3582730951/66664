@@ -16,3 +16,8 @@ jobs:
             -DVMP_PLATFORM=ios -DVMP_ARCH=arm64
       - name: cmake-build
         run: cmake --build build-ios --config Release -- -sdk iphoneos CODE_SIGNING_ALLOWED=NO
+      - name: validate constructor section
+        run: |
+          if ! otool -l build-ios/loader/ios/Release-iphoneos/libvmp_loader_ios.a | grep -E '__mod_init_func|__constructor'; then
+            nm -m build-ios/loader/ios/Release-iphoneos/libvmp_loader_ios.a | grep '__mod_init_func'
+          fi

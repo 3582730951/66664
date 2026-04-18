@@ -15,6 +15,7 @@ enum class RuntimeFlag : std::uint32_t {
   key_rotated = 1u << 3,
   key_context_loaded = 1u << 4,
   placeholder_called = 1u << 5,
+  jit_execmem_unavailable = 1u << 6,
 };
 
 enum class RuntimeEventKind {
@@ -37,7 +38,9 @@ class RuntimeState {
   void observe(RuntimeEventKind kind) noexcept;
   void detector_invalidate_module(std::uint64_t module_id) noexcept;
   void set_flag(RuntimeFlag flag, bool enabled = true) noexcept;
+  void set_jit_capability(bool jit_execmem_unavailable) noexcept;
   bool check_flag(RuntimeFlag flag) const noexcept;
+  bool jit_execmem_unavailable() const noexcept;
   vmp::runtime::audit::AuditWriter* get_audit() const noexcept;
   RuntimeConfig config() const;
   void shutdown() noexcept;

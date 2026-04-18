@@ -11,7 +11,7 @@ jobs:
       - name: deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build build-essential python3 nlohmann-json3-dev libclang-dev llvm-dev clang
+          sudo apt-get install -y cmake ninja-build build-essential python3 nlohmann-json3-dev libclang-dev llvm-dev clang default-jdk
       - uses: dtolnay/rust-toolchain@stable
       - name: cmake-configure
         run: cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=Release

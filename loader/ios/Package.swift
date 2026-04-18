@@ -12,9 +12,13 @@ let package = Package(
             name: "VmpLoaderIOS",
             path: ".",
             exclude: ["README.md"],
-            sources: []
+            sources: [],
+            linkerSettings: [
+                .unsafeFlags(["-lvmp_loader_ios"])
+            ]
         )
     ]
 )
 
-// NOT_IMPLEMENTED: placeholder SwiftPM package for iOS loader integration.
+// Placeholder manifest: when the CMake iOS build is active, the consuming Xcode project
+// should point the linker search path at the generated static archive (libvmp_loader_ios.a).

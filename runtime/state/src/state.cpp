@@ -74,9 +74,17 @@ void RuntimeState::set_flag(RuntimeFlag flag, bool enabled) noexcept {
   }
 }
 
+void RuntimeState::set_jit_capability(bool unavailable) noexcept {
+  set_flag(RuntimeFlag::jit_execmem_unavailable, unavailable);
+}
+
 bool RuntimeState::check_flag(RuntimeFlag flag) const noexcept {
   std::lock_guard<std::mutex> lock(mutex_);
   return (flags_ & bit_for(flag)) != 0;
+}
+
+bool RuntimeState::jit_execmem_unavailable() const noexcept {
+  return check_flag(RuntimeFlag::jit_execmem_unavailable);
 }
 
 vmp::runtime::audit::AuditWriter* RuntimeState::get_audit() const noexcept {

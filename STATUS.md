@@ -689,3 +689,65 @@
   - `cd /workspace/vmp && cargo test --workspace`：通过。
   - `cd /workspace/vmp && rg -n "NOT_IMPLEMENTED" runtime/jit runtime/vm2 tools/src/vmp_vm2_run.cpp tests/runtime_vm2_jit tests/runtime_vm2`：无输出。
   - clean-copy `/tmp/vmp-subtask11-clean`：复制源码（排除 `.git` / `build*` / `target` / `Cargo.lock` / `passwd.txt` / `jit_cache*`）后，重新执行 `cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64 && cmake --build build -j 4 && ctest --test-dir build --output-on-failure && cargo test --workspace`，全部通过。
+
+### subtask_12
+- 本轮清单：
+  - 新增 `loader/common/`：实现 `detect_execmem_available()` 与 `detect_default_audit_path()`，统一处理 `VMP_AUDIT_PATH` / `VMP_FORCE_JIT_CAPABILITY=disallow` / 平台默认审计目录选择，并让 Linux / Windows / Android / iOS loader 复用。
+  - 完成 `loader/android/`：提供公开头 `android_loader.h`、`vmp_android_init()`、导出 `JNI_OnLoad()`、`constructor(101)` fallback、审计 sink 初始化、字符串主密钥恢复、placeholder hook、capability gate 与 `jit_execmem_unavailable` / `loader_init` / `loader_init_failure` 事件。
+  - 完成 `loader/ios/`：提供公开头 `ios_loader.h`、`vmp_ios_init()`、`constructor` 注册、纯 C++ HOME/Documents 审计路径规则、capability gate 与 interpreter-only downgrade 约束、placeholder hook、审计事件。
+  - 扩展 `RuntimeState`：新增 `RuntimeFlag::jit_execmem_unavailable`、`set_jit_capability(bool)` 与查询接口，供 loader 与 JIT 共用。
+  - 收敛 VM1/VM2 JIT capability 逻辑：在 execmem 不可用时拒绝 x64 emitter；Android/Linux/Windows 优先降级到 C backend，若 `cc` 不可用则自动退回解释器；iOS 在 capability gate 命中时强制解释器路径；全部路径统一补 `jit_execmem_unavailable` 审计。
+  - 更新 `tools/vmp-loader-selftest`：按 `VMP_PLATFORM` 选择链接 linux/windows/android/ios loader，自检仍可复用 constructor/TLS 路径。
+  - 新增 loader 真测：
+    - `loader_capability_gate_disallow`：先用 `vmp-loader-selftest` 子进程验证 loader-time `jit_execmem_unavailable` 审计，再验证 `Vm1Jit` 在 `PATH=/nonexistent` + `VMP_JIT_BACKEND=x64` 时退为解释器；
+    - `loader_android_jni_onload_link_probe`：在 Linux + host JDK 头文件下构建 probe `.so`，并用 `nm` 断言 `JNI_OnLoad` 链接/导出链路成立。
+  - 更新 CI：Linux workflow 安装 `default-jdk`；Android workflow 构建后 `nm -D` 校验 `JNI_OnLoad` 导出；iOS workflow 增加构造器 section 验证；补 Android/iOS README 与占位 Gradle/SwiftPM 说明。
+- 变更文件：
+  - `.github/workflows/android.yml`
+  - `.github/workflows/ios.yml`
+  - `.github/workflows/linux.yml`
+  - `loader/CMakeLists.txt`
+  - `loader/README.md`
+  - `loader/common/CMakeLists.txt`
+  - `loader/common/include/vmp/loader/common/platform_caps.h`
+  - `loader/common/src/platform_caps.cpp`
+  - `loader/android/CMakeLists.txt`
+  - `loader/android/README.md`
+  - `loader/android/build.gradle.kts`
+  - `loader/android/include/vmp/loader/android/android_loader.h`
+  - `loader/android/src/android_loader.cpp`
+  - `loader/ios/CMakeLists.txt`
+  - `loader/ios/Package.swift`
+  - `loader/ios/README.md`
+  - `loader/ios/include/vmp/loader/ios/ios_loader.h`
+  - `loader/ios/src/ios_loader.cpp`
+  - `loader/linux/CMakeLists.txt`
+  - `loader/linux/src/linux_loader.cpp`
+  - `loader/windows/CMakeLists.txt`
+  - `loader/windows/src/windows_loader.cpp`
+  - `runtime/jit/CMakeLists.txt`
+  - `runtime/jit/include/vmp/runtime/jit/vm1_jit.h`
+  - `runtime/jit/include/vmp/runtime/jit/vm2_jit.h`
+  - `runtime/jit/src/jit.cpp`
+  - `runtime/jit/src/vm2_jit.cpp`
+  - `runtime/state/include/vmp/runtime/state/state.h`
+  - `runtime/state/src/state.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/loader/assert_nm_symbol.py`
+  - `tests/loader/loader_android_jni_onload_link_probe.cpp`
+  - `tests/loader/loader_capability_gate_disallow.cpp`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_loader_selftest.cpp`
+  - `STATUS.md`
+- 未完成项：
+  - 本轮要求范围内无未完成项。
+- 下一子任务建议：
+  - 进入 subtask 13（二进制重写后端），复用本轮新增的移动端 loader/capability 状态，把重写器生成的入口包装与 Android/iOS 宿主装载路径接起来。
+- 验证：
+  - TDD red：先新增 `tests/loader/loader_capability_gate_disallow.cpp` 并接入 CTest；首次构建失败于缺失 `RuntimeFlag::jit_execmem_unavailable` / runtime-state capability API，随后补实现转绿。
+  - `cd /workspace/vmp && cmake --build build -j`：通过。
+  - `cd /workspace/vmp && ctest --test-dir build --output-on-failure -R 'loader_'`：`11/11` 通过（含 capability gate 与 JNI link probe）。
+  - `cd /workspace/vmp && ctest --test-dir build --output-on-failure`：`85/85` 通过。
+  - `cd /workspace/vmp && cargo test --workspace`：通过。
+  - `cd /workspace/vmp && rg -n "NOT_IMPLEMENTED" loader/android loader/ios loader/common tests/loader runtime/state runtime/jit`：无输出。
+  - clean-copy `/tmp/vmp-sub12-clean`：排除 `.git` / `build*` / `target` / `Cargo.lock` / `passwd.txt` 后，重新执行 `cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64 -DCMAKE_BUILD_TYPE=Release && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`，全部通过。

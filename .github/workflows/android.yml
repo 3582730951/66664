@@ -22,3 +22,6 @@ jobs:
             -DVMP_ARCH=$(case ${{ matrix.abi }} in arm64-v8a) echo arm64 ;; armeabi-v7a) echo arm ;; x86_64) echo x64 ;; esac)
       - name: cmake-build
         run: cmake --build build-android -j
+      - name: verify JNI_OnLoad export
+        run: |
+          nm -D build-android/loader/android/libvmp_loader_android.so | grep ' JNI_OnLoad$'
