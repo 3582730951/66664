@@ -5,6 +5,8 @@
 #include <string>
 
 #include <vmp/runtime/audit/audit.h>
+#include <vmp/runtime/state/hot_recorder.h>
+#include <vmp/runtime/state/profile.h>
 
 namespace vmp::runtime::state {
 
@@ -43,6 +45,15 @@ class RuntimeState {
   bool jit_execmem_unavailable() const noexcept;
   vmp::runtime::audit::AuditWriter* get_audit() const noexcept;
   RuntimeConfig config() const;
+  bool load_offline_profile(const std::string& path) noexcept;
+  OfflineProfile offline_profile() const;
+  OfflineProfile fused_profile_snapshot() const;
+  HotRecorder& hot_recorder() noexcept;
+  const HotRecorder& hot_recorder() const noexcept;
+  double online_weight() const noexcept;
+  void append_audit_event(const std::string& event_type,
+                          const std::string& context_note,
+                          std::uint64_t program_counter = 0) const noexcept;
   void shutdown() noexcept;
 
  private:
@@ -53,6 +64,9 @@ class RuntimeState {
   mutable std::mutex mutex_;
   vmp::runtime::audit::AuditWriter* audit_ = nullptr;
   RuntimeConfig config_{};
+  OfflineProfile offline_profile_{};
+  HotRecorder hot_recorder_{};
+  double online_weight_ = 0.4;
   std::uint32_t flags_ = 0;
   bool initialized_ = false;
 };

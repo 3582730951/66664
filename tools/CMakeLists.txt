@@ -26,7 +26,7 @@ endforeach()
 set_target_properties(vmp-protect PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 set_target_properties(vmp-string-protect PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 
-target_link_libraries(vmp-protect PRIVATE vmp_backend_rewriter vmp_policy vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
+target_link_libraries(vmp-protect PRIVATE vmp_backend_rewriter vmp_policy vmp_runtime_audit vmp_runtime_strings vmp_runtime_state nlohmann_json::nlohmann_json)
 target_link_libraries(vmp-string-protect PRIVATE vmp_runtime_strings vmp_policy nlohmann_json::nlohmann_json)
 
 add_executable(vmp-vm1-asm ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm1_asm.cpp)
@@ -34,7 +34,7 @@ target_link_libraries(vmp-vm1-asm PRIVATE vmp_runtime_vm1)
 set_target_properties(vmp-vm1-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 
 add_executable(vmp-vm1-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm1_run.cpp)
-target_link_libraries(vmp-vm1-run PRIVATE vmp_runtime_vm1 vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
+target_link_libraries(vmp-vm1-run PRIVATE vmp_runtime_vm1 vmp_runtime_audit vmp_runtime_strings vmp_runtime_state nlohmann_json::nlohmann_json)
 if(UNIX AND NOT APPLE)
   target_link_options(vmp-vm1-run PRIVATE -Wl,--export-dynamic)
 elseif(APPLE)
@@ -47,13 +47,17 @@ target_link_libraries(vmp-vm2-asm PRIVATE vmp_runtime_vm2)
 set_target_properties(vmp-vm2-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 
 add_executable(vmp-vm2-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm2_run.cpp)
-target_link_libraries(vmp-vm2-run PRIVATE vmp_runtime_vm2 vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
+target_link_libraries(vmp-vm2-run PRIVATE vmp_runtime_vm2 vmp_runtime_audit vmp_runtime_strings vmp_runtime_state nlohmann_json::nlohmann_json)
 if(UNIX AND NOT APPLE)
   target_link_options(vmp-vm2-run PRIVATE -Wl,--export-dynamic)
 elseif(APPLE)
   target_link_options(vmp-vm2-run PRIVATE -Wl,-export_dynamic)
 endif()
 set_target_properties(vmp-vm2-run PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+
+add_executable(vmp-profile-tool ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_profile_tool.cpp)
+target_link_libraries(vmp-profile-tool PRIVATE vmp_runtime_state nlohmann_json::nlohmann_json)
+set_target_properties(vmp-profile-tool PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 
 
 if(VMP_PLATFORM STREQUAL "windows")

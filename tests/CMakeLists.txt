@@ -196,6 +196,29 @@ set_tests_properties(strings_concurrency_8_threads PROPERTIES PASS_REGULAR_EXPRE
 add_test(NAME strings_pool_corruption_detected COMMAND $<TARGET_FILE:strings_pool_corruption_detected>)
 set_tests_properties(strings_pool_corruption_detected PROPERTIES PASS_REGULAR_EXPRESSION "pool_corruption_detected OK")
 
+# runtime/state tests
+function(vmp_add_runtime_state_test target source)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE vmp_runtime_state vmp_runtime_audit vmp_policy nlohmann_json::nlohmann_json)
+  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+  add_test(NAME ${target} COMMAND $<TARGET_FILE:${target}>)
+  set_tests_properties(${target} PROPERTIES PASS_REGULAR_EXPRESSION "${target} OK")
+endfunction()
+
+vmp_add_runtime_state_test(profile_round_trip ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/profile_round_trip.cpp)
+vmp_add_runtime_state_test(profile_validator_rejects_oob ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/profile_validator_rejects_oob.cpp)
+vmp_add_runtime_state_test(hot_recorder_concurrency_8_threads ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/hot_recorder_concurrency_8_threads.cpp)
+vmp_add_runtime_state_test(fusion_does_not_change_policy ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/fusion_does_not_change_policy.cpp)
+vmp_add_runtime_state_test(scheduler_chooses_jit_when_hot ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/scheduler_chooses_jit_when_hot.cpp)
+vmp_add_runtime_state_test(scheduler_evicts_cold ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/scheduler_evicts_cold.cpp)
+vmp_add_runtime_state_test(scheduler_caches_resize_within_bounds ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/scheduler_caches_resize_within_bounds.cpp)
+vmp_add_runtime_state_test(audit_decision_logged ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/audit_decision_logged.cpp)
+
+add_test(NAME vmp_profile_tool_merge_diff_validate
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime_state/vmp_profile_tool_merge_diff_validate.py
+          $<TARGET_FILE:vmp-profile-tool>)
+set_tests_properties(vmp_profile_tool_merge_diff_validate PROPERTIES PASS_REGULAR_EXPRESSION "vmp_profile_tool_merge_diff_validate OK")
+
 # runtime/vm1 tests
 add_executable(vm1_asm_round_trip ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1/vm1_asm_round_trip.cpp)
 target_link_libraries(vm1_asm_round_trip PRIVATE vmp_runtime_vm1 vmp_runtime_audit)

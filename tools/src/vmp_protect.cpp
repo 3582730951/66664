@@ -15,6 +15,7 @@
 #include <vmp/runtime/audit/audit.h>
 #include <vmp/runtime/audit/detector.h>
 #include <vmp/runtime/audit/reaction.h>
+#include <vmp/runtime/state/profile.h>
 
 #include "string_protect_common.h"
 
@@ -30,6 +31,7 @@ struct Options {
   bool validate_only = false;
   bool detector_selftest = false;
   bool protect_strings = false;
+  std::string profile_out_path;
   std::string platform = VMP_PLATFORM_STR;
   std::string string_bin = "string_pool.bin";
   std::string string_idx = "string_pool.idx.json";
@@ -56,6 +58,7 @@ int usage(const char* argv0, const std::string& message = {}) {
             << " [--dump-schema] [--policy <path>] [--rust-target-dir <dir>] [--emit-policy-json <path>] [--validate-only]"
             << " [--detector-selftest] [--platform <linux|windows|android|ios|macos>]"
             << " [--protect-strings --string-bin <bin> --string-idx <idx> --string-kdf <kdf>]"
+            << " [--profile-out <path>]"
             << " [--input <path> --output <path> [--lift] [--strings-pool <bin> --strings-idx <json>] [--vm1-module <module.vm1>] [--vm2-module <module.vm2>]]"
             << std::endl;
   return 1;
@@ -81,6 +84,8 @@ Options parse_args(int argc, char** argv) {
       options.protect_strings = true;
     } else if (arg == "--platform") {
       options.platform = argv[++i];
+    } else if (arg == "--profile-out") {
+      options.profile_out_path = argv[++i];
     } else if (arg == "--string-bin") {
       options.string_bin = argv[++i];
     } else if (arg == "--string-idx") {
@@ -368,6 +373,14 @@ int main(int argc, char** argv) {
 
     if (!options.emit_policy_json_path.empty()) {
       vmp::policy::save_to_file(policy_ir, options.emit_policy_json_path);
+    }
+    if (!options.profile_out_path.empty()) {
+      vmp::runtime::state::OfflineProfile baseline_profile;
+      baseline_profile.source_seed = policy_ir.defaults.profile_seed;
+      baseline_profile.meta["schema"] = "vp1";
+      baseline_profile.meta["generator"] = "vmp-protect";
+      baseline_profile.meta["platform"] = options.platform;
+      vmp::runtime::state::save_to_file(baseline_profile, options.profile_out_path);
     }
 
     const bool has_rewrite = !options.input_path.empty() || !options.output_path.empty();

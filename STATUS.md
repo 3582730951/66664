@@ -864,3 +864,56 @@
   - `ctest --test-dir build --output-on-failure`：`100/100` 通过（`rewriter_pe_roundtrip` 依平台前置条件被标记 skip）。
   - `cargo test --workspace`：通过。
   - clean copy：`/tmp/vmp_subtask14_clean/vmp` 下重新 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure`：通过，`100/100` 通过（同上 1 个 skip）。
+
+### subtask_15
+- 本轮清单：
+  - 实现离线画像格式：`ProfileEntry` / `OfflineProfile`、`vp1` JSON 读写、严格 unknown field 拒绝、范围校验、重复 `(module_id, pc)` 拒绝。
+  - 实现在线记录器：`HotRecorder` 线程安全记录函数/块/trace/JIT hit/miss/域切换/敏感数据访问，并提供不可变 `snapshot()`。
+  - 实现画像融合：`RuntimeState::init_once(...)` 支持从 `VMP_OFFLINE_PROFILE` 自动加载；在线权重默认 `0.4`，未满 `60s` 强制 `0`；融合仅影响调度输入，不触碰 Policy IR 强约束字段。
+  - 实现热点调度器：输出 `jit_compile_now` / `jit_evict` / `trace_stitch` / `trace_break` / `cache_resize` / `warmup_kick`，并通过既有 `Vm1Jit` / `Vm2Jit` hook 应用。
+  - 接入审计：新增 `profile_loaded`、`profile_load_failed`、`scheduler_decision`、`scheduler_skipped`、`trace_stitch_applied`、`cache_resize`，统一非干扰式 log。
+  - 扩展 CLI：
+    - `vmp-protect --profile-out <path>` 输出基线画像
+    - `vmp-vm1-run --profile/--profile-out`
+    - `vmp-vm2-run --profile/--profile-out`
+    - 新增 `vmp-profile-tool merge|diff|validate`
+  - 新增 `tests/runtime_state/` 真测与 CTest 集成，覆盖 round-trip、validator、8 线程 recorder、fusion 不改 Policy IR、scheduler compile/evict/resize、audit、profile-tool 端到端。
+  - 更新 `runtime/state/README.md` 文档。
+- 变更文件：
+  - `runtime/state/CMakeLists.txt`
+  - `runtime/state/README.md`
+  - `runtime/state/include/vmp/runtime/state/hot_recorder.h`
+  - `runtime/state/include/vmp/runtime/state/profile.h`
+  - `runtime/state/include/vmp/runtime/state/scheduler.h`
+  - `runtime/state/include/vmp/runtime/state/state.h`
+  - `runtime/state/src/hot_recorder.cpp`
+  - `runtime/state/src/profile.cpp`
+  - `runtime/state/src/scheduler.cpp`
+  - `runtime/state/src/state.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/runtime_state/test_common.h`
+  - `tests/runtime_state/profile_round_trip.cpp`
+  - `tests/runtime_state/profile_validator_rejects_oob.cpp`
+  - `tests/runtime_state/hot_recorder_concurrency_8_threads.cpp`
+  - `tests/runtime_state/fusion_does_not_change_policy.cpp`
+  - `tests/runtime_state/scheduler_chooses_jit_when_hot.cpp`
+  - `tests/runtime_state/scheduler_evicts_cold.cpp`
+  - `tests/runtime_state/scheduler_caches_resize_within_bounds.cpp`
+  - `tests/runtime_state/audit_decision_logged.cpp`
+  - `tests/runtime_state/vmp_profile_tool_merge_diff_validate.py`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_profile_tool.cpp`
+  - `tools/src/vmp_protect.cpp`
+  - `tools/src/vmp_vm1_run.cpp`
+  - `tools/src/vmp_vm2_run.cpp`
+  - `STATUS.md`
+- 未完成项：
+  - 本轮范围内无遗留；未扩展到子任务 16/17 的完整性与全量测试扩展。
+- 下一子任务建议：
+  - 进入子任务 16（integrity check + 独立线程 CRC / timing / anti-patching 状态机接入），继续复用本轮 `RuntimeState + Audit + Scheduler` 接口面。
+- 验证：
+  - `cmake --build build -j4`：通过。
+  - `cd build && ctest --output-on-failure`：`109/109` 通过（`rewriter_pe_roundtrip` 按平台预期 skipped）。
+  - `cargo test --workspace`：通过。
+  - `./build/tools/vmp-profile-tool validate/merge/diff`：通过；示例 merged profile 大小 `245` bytes。
+  - `/tmp/vmp_clean_subtask15` clean-copy：`cmake -S . -B build -G Ninja && cmake --build build -j4 && ctest --test-dir build --output-on-failure && cargo test --workspace` 全部通过。

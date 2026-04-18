@@ -9,6 +9,9 @@
 #include <vmp/runtime/audit/reaction.h>
 #include <vmp/runtime/bridge/bridge.h>
 #include <vmp/runtime/jit/vm1_jit.h>
+#include <vmp/runtime/state/profile.h>
+#include <vmp/runtime/state/scheduler.h>
+#include <vmp/runtime/state/state.h>
 #include <vmp/runtime/strings/cipher.h>
 #include <vmp/runtime/strings/keyctx.h>
 #include <vmp/runtime/vm1/vm1.h>
@@ -24,6 +27,8 @@ struct Options {
   std::string key_env = "VMP_STRING_MASTER_KEY";
   std::uint32_t native_print_string = 0;
   std::string jit = "auto";
+  std::string profile_path;
+  std::string profile_out_path;
   std::string module_path;
   std::vector<std::string> args;
 };
@@ -52,6 +57,10 @@ Options parse_args(int argc, char** argv) {
       options.native_print_string = static_cast<std::uint32_t>(std::stoul(argv[++argi]));
     } else if (arg == "--jit") {
       options.jit = argv[++argi];
+    } else if (arg == "--profile") {
+      options.profile_path = argv[++argi];
+    } else if (arg == "--profile-out") {
+      options.profile_out_path = argv[++argi];
     } else if (arg.rfind("--jit=", 0) == 0) {
       options.jit = arg.substr(6);
     } else if (arg.rfind("--", 0) == 0) {
@@ -100,6 +109,15 @@ int main(int argc, char** argv) {
       vmp::runtime::jit::Vm1Jit::instance().set_audit_writer(writer.get());
     }
 
+    auto& runtime_state = vmp::runtime::state::RuntimeState::instance();
+    runtime_state.shutdown();
+    runtime_state.init_once(writer.get(), {VMP_PLATFORM_STR, "vmp-vm1-run", false});
+    if (!options.profile_path.empty()) {
+      if (!runtime_state.load_offline_profile(options.profile_path)) {
+        throw std::runtime_error("failed to load offline profile");
+      }
+    }
+
     if (!options.string_pool_path.empty() || !options.string_idx_path.empty()) {
       if (options.string_pool_path.empty() || options.string_idx_path.empty()) {
         throw std::runtime_error("--string-pool and --string-idx must be used together");
@@ -122,10 +140,38 @@ int main(int argc, char** argv) {
     }
 
     vmp::runtime::vm1::Vm1Interpreter interpreter;
+
+    if (!options.profile_path.empty()) {
+      vmp::runtime::state::HotScheduler scheduler;
+      vmp::runtime::state::SchedulerInput input;
+      input.modules[module.id()].current_budget_bytes = vmp::runtime::jit::Vm1Jit::instance().module_cache_budget_bytes();
+      vmp::runtime::state::SchedulerBindings bindings;
+      bindings.vm1_modules[module.id()] = &module;
+      auto actions = scheduler.make_actions(runtime_state.fused_profile_snapshot(), runtime_state.hot_recorder().snapshot(),
+                                            input, &runtime_state);
+      scheduler.apply_actions(actions, bindings, &runtime_state);
+    }
+
     const auto result = interpreter.execute(context);
+    for (const auto& [pc, hits] : module.block_hit_counters) {
+      for (std::uint64_t i = 0; i < hits; ++i) {
+        runtime_state.hot_recorder().record_block_entry(module.id(), pc);
+      }
+      const auto stats = vmp::runtime::jit::Vm1Jit::instance().entry_stats(module.id(), pc);
+      for (std::uint64_t i = 0; i < stats.hit_count; ++i) runtime_state.hot_recorder().record_jit_hit(module.id(), pc);
+      const auto misses = hits > stats.hit_count ? hits - stats.hit_count : 0;
+      for (std::uint64_t i = 0; i < misses; ++i) runtime_state.hot_recorder().record_jit_miss(module.id(), pc);
+    }
+    runtime_state.hot_recorder().set_uptime_seconds_for_tests(120.0);
+    if (!options.profile_out_path.empty()) {
+      const auto online_profile = vmp::runtime::state::offline_profile_from_snapshot(runtime_state.hot_recorder().snapshot(),
+                                                                                      module.id());
+      vmp::runtime::state::save_to_file(online_profile, options.profile_out_path);
+    }
     if (writer) {
       writer->flush();
     }
+    runtime_state.shutdown();
     std::cout << "ret_int=" << result.ret_int << " ret_float=" << result.ret_float << '\n';
     return 0;
   } catch (const std::exception& ex) {
