@@ -4,3 +4,5 @@ vmp_add_placeholder_library(vmp_policy
   INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 target_link_libraries(vmp_policy PUBLIC nlohmann_json::nlohmann_json)
+
+set_target_properties(vmp_policy PROPERTIES POSITION_INDEPENDENT_CODE ON)

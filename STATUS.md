@@ -185,3 +185,57 @@
   - `ctest --test-dir build-ci-fix --output-on-failure`：`9/9` 通过，证明测试不依赖 `/workspace/vmp` 绝对路径。
 - 未完成项：无（本轮要求范围内）。
 - 下一子任务建议：等待 supervisor 指定下一轮 CI/跨平台修复项。
+
+### subtask_04
+- 本轮清单：
+  - 实现 `bindings/cpp/include/vmp/bindings/cpp/annotate.h`，提供 zero-cost `VMP_VM_FUNC` / `VMP_VM_STRING` 头文件宏；Clang/GCC 走 `annotate("vmp_vm_*")`，MSVC C++ 走 `[[vmp::...]]`，MSVC C 保留源码标记供 fallback 扫描。
+  - 实现 `bindings/cpp` C/C++ 标注前端：
+    - `vmp-cpp-clang-collect`：基于 Clang AST 的采集工具，识别函数/变量上的 `annotate("vmp_vm_func")`、`annotate("vmp_vm_string")`，输出单个 Policy IR JSON。
+    - `vmp_annotate_plugin`：FrontendAction/plugin 形态的 clang 插件构建产物（满足 plugin 模式交付）；驱动当前优先使用独立 AST collector，plugin 路径信息仍保留给 `-Xclang -load`/`VMP_PLUGIN_DIR`。
+    - `vmp-cpp-fallback-scan`：无 LLVM/Clang dev 或 `VMP_DISABLE_CLANG_PLUGIN=1` 时启用的源码正则扫描器，覆盖 `VMP_VM_FUNC` / `VMP_VM_STRING` / `annotate(...)` / `[[vmp::...]]` 标记。
+  - 实现 `tools/vmp-clang` / `tools/vmp-clang++`：兼容 `clang` 参数透传；带 `--vmp-collect=<policy.json>` 时先调用宿主编译，再运行 AST collector，失败时回落到 fallback scanner；无 `--vmp-collect` 时退化为纯透传。
+  - 完成语义映射：
+    - `VM_func` → `protection_domain=vm1`
+    - `VM_string` → `sensitivity_level=highly_sensitive`、`plaintext_budget=transient_only`
+    - 同时 `VM_func + VM_string` 的函数保持 `vm1` 执行域，并升级敏感数据保护
+    - 变量声明、`const char[]`、`constexpr char[]`、`constexpr std::string_view` 初始化中的字符串字面量均能采集
+    - `symbol_or_region` 在 AST collector 模式下输出 `mangled|display`，fallback 模式输出源码名或 `literal::<file>:<line>[ :<column> ]|"text"`
+  - 完成 `tests/bindings_cpp/` 真测：C/C++ 样例、期望 JSON、JSON 语义比较脚本、fallback 强制禁用测试、clang/gcc 头文件编译测试、wrapper 透传测试。
+  - 更新 `bindings/cpp/README.md`，补充宏、collector/plugin/fallback 机制、Policy IR 字段映射。
+- 变更文件：
+  - `CMakeLists.txt`
+  - `STATUS.md`
+  - `bindings/cpp/CMakeLists.txt`
+  - `bindings/cpp/README.md`
+  - `bindings/cpp/clang_plugin/vmp_annotate_plugin.cpp`
+  - `bindings/cpp/clang_plugin/vmp_annotate_tool.cpp`
+  - `bindings/cpp/include/vmp/bindings/cpp/annotate.h`
+  - `bindings/cpp/include/vmp/bindings/cpp/plugin.h`
+  - `bindings/cpp/src/fallback_scanner.cpp`
+  - `bindings/cpp/src/fallback_scanner_main.cpp`
+  - `bindings/cpp/src/plugin.cpp`
+  - `policy/CMakeLists.txt`
+  - `tests/CMakeLists.txt`
+  - `tests/bindings_cpp/assert_exists.py`
+  - `tests/bindings_cpp/compare_policy_json.py`
+  - `tests/bindings_cpp/expected_c.json`
+  - `tests/bindings_cpp/expected_cpp_fallback.json`
+  - `tests/bindings_cpp/expected_cpp_plugin.json`
+  - `tests/bindings_cpp/sample_c.c`
+  - `tests/bindings_cpp/sample_cpp.cpp`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_clang.cpp`
+  - `tools/src/vmp_clangxx.cpp`
+  - `tools/src/vmp_driver_common.h`
+- 未完成项：
+  - 未做 LLVM backend 真实 IR 改写；本轮仅做采集与 JSON 产出。
+  - 未做 Rust 过程宏、VM/JIT/字符串保护真实实现（按本轮范围未展开）。
+  - `vmp_annotate_plugin` 当前作为构建交付物保留，但驱动默认优先走独立 AST collector；后续如需直接 `-Xclang -load` 生产链路，可继续把 plugin 路径接入外部构建系统。
+- 下一子任务建议：
+  - 进入 analyzer / planner 对接：消费本轮产出的 Policy IR entries，把 `VM_func`/`VM_string` 前端硬约束接到 Program IR / Protection Plan 最小闭环。
+- 验证：
+  - `cmake --build build -j`：通过。
+  - `ctest --test-dir build --output-on-failure`：`20/20` 通过。
+  - `cargo test --workspace`：通过。
+  - `rg -n 'NOT_IMPLEMENTED' bindings/cpp`：无结果。
+  - `/tmp/vmp_ci_sim` 中重跑 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`：全部通过。

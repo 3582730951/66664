@@ -1,0 +1,181 @@
+{
+  "defaults": {
+    "annotation_origin": "attribute",
+    "event_types": [],
+    "integrity_level": "none",
+    "jit_policy": "off",
+    "language_origin": "binary",
+    "mobile_bridge_mode": "off",
+    "plaintext_budget": "transient_only",
+    "platform_caps": [],
+    "profile_seed": 0,
+    "protection_domain": "native",
+    "reaction_policy": "log",
+    "sensitivity_level": "normal"
+  },
+  "entries": [
+    {
+      "annotation_origin": "attribute",
+      "annotation_tags": [
+        "vm_string"
+      ],
+      "event_types": [],
+      "integrity_level": "none",
+      "jit_policy": "off",
+      "language_origin": "c",
+      "mobile_bridge_mode": "off",
+      "plaintext_budget": "transient_only",
+      "platform_caps": [],
+      "profile_seed": 0,
+      "protection_domain": "native",
+      "reaction_policy": "log",
+      "sensitivity_level": "highly_sensitive",
+      "source_location": {
+        "column": 33,
+        "file": "tests/bindings_cpp/sample_c.c",
+        "line": 9
+      },
+      "symbol_or_region": "c_secret"
+    },
+    {
+      "annotation_origin": "attribute",
+      "annotation_tags": [
+        "vm_string"
+      ],
+      "event_types": [],
+      "integrity_level": "none",
+      "jit_policy": "off",
+      "language_origin": "c",
+      "mobile_bridge_mode": "off",
+      "plaintext_budget": "transient_only",
+      "platform_caps": [],
+      "profile_seed": 0,
+      "protection_domain": "native",
+      "reaction_policy": "log",
+      "sensitivity_level": "highly_sensitive",
+      "source_location": {
+        "column": 33,
+        "file": "tests/bindings_cpp/sample_c.c",
+        "line": 10
+      },
+      "symbol_or_region": "c_token"
+    },
+    {
+      "annotation_origin": "attribute",
+      "annotation_tags": [
+        "vm_string"
+      ],
+      "event_types": [],
+      "integrity_level": "none",
+      "jit_policy": "off",
+      "language_origin": "c",
+      "mobile_bridge_mode": "off",
+      "plaintext_budget": "transient_only",
+      "platform_caps": [],
+      "profile_seed": 0,
+      "protection_domain": "native",
+      "reaction_policy": "log",
+      "sensitivity_level": "highly_sensitive",
+      "source_location": {
+        "column": 45,
+        "file": "tests/bindings_cpp/sample_c.c",
+        "line": 10
+      },
+      "symbol_or_region": "literal::tests/bindings_cpp/sample_c.c:10:45|\"c-token\""
+    },
+    {
+      "annotation_origin": "attribute",
+      "annotation_tags": [
+        "vm_string"
+      ],
+      "event_types": [],
+      "integrity_level": "none",
+      "jit_policy": "off",
+      "language_origin": "c",
+      "mobile_bridge_mode": "off",
+      "plaintext_budget": "transient_only",
+      "platform_caps": [],
+      "profile_seed": 0,
+      "protection_domain": "native",
+      "reaction_policy": "log",
+      "sensitivity_level": "highly_sensitive",
+      "source_location": {
+        "column": 46,
+        "file": "tests/bindings_cpp/sample_c.c",
+        "line": 9
+      },
+      "symbol_or_region": "literal::tests/bindings_cpp/sample_c.c:9:46|\"c-secret\""
+    },
+    {
+      "annotation_origin": "attribute",
+      "annotation_tags": [
+        "vm_func"
+      ],
+      "event_types": [],
+      "integrity_level": "none",
+      "jit_policy": "off",
+      "language_origin": "c",
+      "mobile_bridge_mode": "off",
+      "plaintext_budget": "transient_only",
+      "platform_caps": [],
+      "profile_seed": 0,
+      "protection_domain": "vm1",
+      "reaction_policy": "log",
+      "sensitivity_level": "sensitive",
+      "source_location": {
+        "column": 17,
+        "file": "tests/bindings_cpp/sample_c.c",
+        "line": 3
+      },
+      "symbol_or_region": "vm_declared_only"
+    },
+    {
+      "annotation_origin": "attribute",
+      "annotation_tags": [
+        "vm_func"
+      ],
+      "event_types": [],
+      "integrity_level": "none",
+      "jit_policy": "off",
+      "language_origin": "c",
+      "mobile_bridge_mode": "off",
+      "plaintext_budget": "transient_only",
+      "platform_caps": [],
+      "profile_seed": 0,
+      "protection_domain": "vm1",
+      "reaction_policy": "log",
+      "sensitivity_level": "sensitive",
+      "source_location": {
+        "column": 17,
+        "file": "tests/bindings_cpp/sample_c.c",
+        "line": 5
+      },
+      "symbol_or_region": "vm_defined_c"
+    },
+    {
+      "annotation_origin": "attribute",
+      "annotation_tags": [
+        "vm_func",
+        "vm_string"
+      ],
+      "event_types": [],
+      "integrity_level": "none",
+      "jit_policy": "off",
+      "language_origin": "c",
+      "mobile_bridge_mode": "off",
+      "plaintext_budget": "transient_only",
+      "platform_caps": [],
+      "profile_seed": 0,
+      "protection_domain": "vm1",
+      "reaction_policy": "log",
+      "sensitivity_level": "highly_sensitive",
+      "source_location": {
+        "column": 31,
+        "file": "tests/bindings_cpp/sample_c.c",
+        "line": 12
+      },
+      "symbol_or_region": "vm_dual_c"
+    }
+  ],
+  "schema_version": 1
+}

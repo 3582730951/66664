@@ -1,0 +1,21 @@
+policy_cpp_test 2 0.0155015
+vmp_protect_good_policy 2 0.0048165
+vmp_protect_bad_policy 2 0.0333131
+vmp_protect_dump_schema 2 0.00405155
+vmp_protect_detector_selftest 2 0.0404128
+bindings_cpp_collect_c 5 0.0377963
+bindings_cpp_collect_c_compare 4 0.0170233
+bindings_cpp_collect_cpp 4 0.110016
+bindings_cpp_collect_cpp_compare 2 0.0420135
+bindings_cpp_collect_cpp_fallback 4 0.045979
+bindings_cpp_collect_cpp_fallback_compare 4 0.0236406
+bindings_cpp_header_compile_clang_c 5 0.0103146
+bindings_cpp_header_compile_clang_cpp 5 0.0349283
+bindings_cpp_header_compile_gcc_c 5 0.011051
+bindings_cpp_header_compile_gcc_cpp 5 0.0421507
+bindings_cpp_vmp_clang_passthrough 5 0.00949446
+bindings_cpp_vmp_clang_passthrough_exists 5 0.0104474
+dummy_python_smoke 1 0.0170247
+audit_cpp_test 1 0.581364
+cross_language_golden 1 0.903136
+---
