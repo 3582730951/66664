@@ -423,6 +423,19 @@ function(vmp_add_vm1_jit_test target source)
   set_tests_properties(${target} PROPERTIES PASS_REGULAR_EXPRESSION "${target} OK")
 endfunction()
 
+function(vmp_add_vm2_jit_test target source)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE vmp_runtime_vm2 vmp_runtime_strings vmp_runtime_audit vmp_runtime_state)
+  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+  if(UNIX AND NOT APPLE)
+    target_link_options(${target} PRIVATE -Wl,--export-dynamic)
+  elseif(APPLE)
+    target_link_options(${target} PRIVATE -Wl,-export_dynamic)
+  endif()
+  add_test(NAME ${target} COMMAND $<TARGET_FILE:${target}>)
+  set_tests_properties(${target} PROPERTIES PASS_REGULAR_EXPRESSION "${target} OK")
+endfunction()
+
 vmp_add_vm1_jit_test(jit_correctness_add_loop ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_correctness_add_loop.cpp)
 vmp_add_vm1_jit_test(jit_correctness_fib_recursive ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_correctness_fib_recursive.cpp)
 vmp_add_vm1_jit_test(jit_string_barrier ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_string_barrier.cpp)
@@ -432,6 +445,17 @@ vmp_add_vm1_jit_test(jit_cache_size_bound ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm
 vmp_add_vm1_jit_test(jit_backend_switch ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_backend_switch.cpp)
 vmp_add_vm1_jit_test(jit_disabled ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_disabled.cpp)
 vmp_add_vm1_jit_test(jit_no_degrade_to_native ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_no_degrade_to_native.cpp)
+
+vmp_add_vm2_jit_test(vm2_jit_correctness_fib20 ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_correctness_fib20.cpp)
+vmp_add_vm2_jit_test(vm2_jit_function_level_only ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_function_level_only.cpp)
+vmp_add_vm2_jit_test(vm2_jit_integrity_failure_evicts ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_integrity_failure_evicts.cpp)
+vmp_add_vm2_jit_test(vm2_jit_predicate_preserved ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_predicate_preserved.cpp)
+vmp_add_vm2_jit_test(vm2_jit_tsload_no_speculation ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_tsload_no_speculation.cpp)
+vmp_add_vm2_jit_test(vm2_jit_invalidate_key_rotation ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_invalidate_key_rotation.cpp)
+vmp_add_vm2_jit_test(vm2_jit_invalidate_integrity ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_invalidate_integrity.cpp)
+vmp_add_vm2_jit_test(vm2_jit_backend_parity ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_backend_parity.cpp)
+vmp_add_vm2_jit_test(vm2_jit_disabled ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_disabled.cpp)
+vmp_add_vm2_jit_test(vm2_jit_no_degrade_to_native ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm2_jit/vm2_jit_no_degrade_to_native.cpp)
 
 set(VMP_VM1_EXECUTABLE_TARGETS
   vm1_asm_round_trip
@@ -451,7 +475,17 @@ set(VMP_VM1_EXECUTABLE_TARGETS
   jit_cache_size_bound
   jit_backend_switch
   jit_disabled
-  jit_no_degrade_to_native)
+  jit_no_degrade_to_native
+  vm2_jit_correctness_fib20
+  vm2_jit_function_level_only
+  vm2_jit_integrity_failure_evicts
+  vm2_jit_predicate_preserved
+  vm2_jit_tsload_no_speculation
+  vm2_jit_invalidate_key_rotation
+  vm2_jit_invalidate_integrity
+  vm2_jit_backend_parity
+  vm2_jit_disabled
+  vm2_jit_no_degrade_to_native)
 foreach(target IN LISTS VMP_VM1_EXECUTABLE_TARGETS)
   if(TARGET ${target})
     if(UNIX AND NOT APPLE)

@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <vmp/runtime/audit/reaction.h>
@@ -30,6 +31,25 @@ class Vm2Module {
   std::vector<std::uint8_t> code;
   std::vector<Vm2ConstPoolEntry> const_pool;
   std::array<std::uint8_t, kVm2KeyContextIdSize> key_context_id{};
+  std::uint64_t runtime_id = 0;
+  std::unordered_set<std::uint32_t> function_entries;
+  mutable std::unordered_map<std::uint32_t, std::uint64_t> function_hit_counters;
+  mutable std::unordered_map<std::uint32_t, std::uintptr_t> function_jit_table;
+
+  std::uint64_t id() const noexcept { return runtime_id; }
+  std::uint64_t note_function_hit(std::uint32_t pc) const { return ++function_hit_counters[pc]; }
+  std::uint64_t function_hit_count(std::uint32_t pc) const {
+    auto it = function_hit_counters.find(pc);
+    return it == function_hit_counters.end() ? 0u : it->second;
+  }
+  bool is_function_entry_pc(std::uint32_t pc) const noexcept { return function_entries.find(pc) != function_entries.end(); }
+  void set_function_jit_entry(std::uint32_t pc, std::uintptr_t entry) const { function_jit_table[pc] = entry; }
+  void clear_function_jit_entry(std::uint32_t pc) const { function_jit_table.erase(pc); }
+  void clear_function_jit_entries() const { function_jit_table.clear(); }
+  std::uintptr_t function_jit_entry(std::uint32_t pc) const {
+    auto it = function_jit_table.find(pc);
+    return it == function_jit_table.end() ? 0u : it->second;
+  }
 
   static Vm2Module load_from_file(const std::string& path);
   static Vm2Module load_from_bytes(const std::vector<std::uint8_t>& bytes);
@@ -129,6 +149,8 @@ class Vm2Context {
   std::vector<std::uint64_t> root_transient_handles_;
   std::unordered_map<std::uint64_t, std::unique_ptr<vmp::runtime::strings::TransientView>> transient_strings_;
   std::uint64_t next_transient_handle_ = 1;
+  bool execution_halted = false;
+  std::uint32_t jit_skip_entry_once_pc = 0xFFFFFFFFu;
 };
 
 class Vm2Interpreter {

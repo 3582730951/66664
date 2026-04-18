@@ -637,3 +637,55 @@
   - 当前 trace 观测/升级为稳定二块 super-block 起步实现，后续可在不改变保护语义的前提下继续扩展 trace 拼接深度与 profile 融合。
 - 下一子任务建议：
   - 进入 subtask 11，按 plan §7.3 实现 VM2 function-level JIT，并复用本轮完成的失效/审计/缓存策略骨架。
+
+### subtask_11
+- 本轮清单：
+  - 实现 `runtime/jit/include/vmp/runtime/jit/vm2_jit.h` + `runtime/jit/src/vm2_jit.cpp`：新增 `Vm2Jit` 单例，固定为 VM2 function-level JIT；按 `(module_id, entry_pc)` 管理编译入口、`COMPILING/READY/INVALIDATED/EVICTED` 生命周期、4 MiB 默认 per-module cache budget、LRU 驱逐、事件失效与 debug 篡改接口。
+  - 为 VM2 JIT 落地双后端：
+    - C backend 为每个 VM2 函数入口生成独立 translation unit，并通过 `vmp_vm2_jit_execute_function(ctx, entry_pc)` trampoline 执行；
+    - Linux x86_64 backend 生成接收 `Vm2Context*` 的 tiny trampoline，限定 VM2 整数 + 128-bit 向量子集，超出子集自动审计 `vm2_jit_fallback_backend` 并回退 C backend。
+  - 新增更严格完整性标签：安装时以 `KeyContext::derive_subkey("vm2_jit_integrity")`（无 `key_context` 时退化为进程内 fallback `KeyContext`）计算 `HMAC-SHA256(module_id || entry_pc || compiled_machine_code)`；解释器每次切入已编译函数前重新验证，失败时自失效、记录 `vm2_jit_integrity_failure`、回退解释执行，并通过 cooldown 防止同次运行立即重编译。
+  - 扩展 VM2 模块/上下文元数据：`runtime_id`、`function_entries`、函数热度计数、`function_jit_table`、`execution_halted`、JIT skip-once 标志；修正 VM2 组装器的 `entry` 默认入口与 `tsrelease` 编码，保证已有 VM2 非 JIT 测试继续通过。
+  - 更新 VM2 解释器接线：在函数入口（`entry_pc` 与 `blnk/pcall` 目标）累积热度并触发 `Vm2Jit::compile_if_needed`；函数调用进入点优先经 `Vm2Jit::dispatch` 路由；新增 `vmp_vm2_jit_execute_function` helper 以“执行到当前函数返回”为边界，保持 predicate/`tsload`/跨域行为不变。
+  - 更新运行时状态联动：`RuntimeState` 现在同时驱动 VM1/VM2 JIT 审计句柄与 `key_rotated` / `integrity_failed` / `env_anomaly(detection_event)` 失效路径；模块级 detector 失效也会清空 VM2 JIT。
+  - 更新 CLI/文档：`vmp-vm2-run` 新增 `--jit=off|c|x64`，`runtime/jit/README.md` / `runtime/vm2/README.md` 增补 VM2 JIT、完整性标签与工具说明。
+  - 新增 `tests/runtime_vm2_jit/` 10 个真测并接入 CTest，覆盖 function-level only、完整性失败自失效、predicate 保真、`tsload/tsrelease` barrier、key rotation / integrity 失效、后端 parity、disabled/no-degrade 等要求。
+- 变更文件：
+  - `runtime/jit/CMakeLists.txt`
+  - `runtime/jit/README.md`
+  - `runtime/jit/include/vmp/runtime/jit/jit.h`
+  - `runtime/jit/include/vmp/runtime/jit/vm2_jit.h`
+  - `runtime/jit/src/vm2_jit.cpp`
+  - `runtime/state/CMakeLists.txt`
+  - `runtime/state/src/state.cpp`
+  - `runtime/vm2/CMakeLists.txt`
+  - `runtime/vm2/README.md`
+  - `runtime/vm2/include/vmp/runtime/vm2/vm2.h`
+  - `runtime/vm2/src/interpreter.cpp`
+  - `runtime/vm2/src/vm2.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/runtime_vm2_jit/test_common.h`
+  - `tests/runtime_vm2_jit/vm2_jit_correctness_fib20.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_function_level_only.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_integrity_failure_evicts.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_predicate_preserved.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_tsload_no_speculation.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_invalidate_key_rotation.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_invalidate_integrity.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_backend_parity.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_disabled.cpp`
+  - `tests/runtime_vm2_jit/vm2_jit_no_degrade_to_native.cpp`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_vm2_run.cpp`
+  - `STATUS.md`
+- 未完成项：
+  - 本轮要求范围内无未完成项。
+- 下一子任务建议：
+  - 若继续 runtime 方向，可进入后续更高层的保护计划/loader 对接，让 Policy/Planner 实际选择 VM2 function-level JIT 热点，而不是仅由 runtime 热度自适应触发。
+- 验证：
+  - TDD red：先新增 `tests/runtime_vm2_jit/` 与 CTest 接线；首次构建失败于缺失 `vmp/runtime/jit/vm2_jit.h`，随后实现 VM2 JIT 接口并逐步转绿。
+  - `cd /workspace/vmp && cmake --build build -j`：通过。
+  - `cd /workspace/vmp/build && ctest --output-on-failure`：`83/83` 通过（含 10 个新增 VM2 JIT 测试）。
+  - `cd /workspace/vmp && cargo test --workspace`：通过。
+  - `cd /workspace/vmp && rg -n "NOT_IMPLEMENTED" runtime/jit runtime/vm2 tools/src/vmp_vm2_run.cpp tests/runtime_vm2_jit tests/runtime_vm2`：无输出。
+  - clean-copy `/tmp/vmp-subtask11-clean`：复制源码（排除 `.git` / `build*` / `target` / `Cargo.lock` / `passwd.txt` / `jit_cache*`）后，重新执行 `cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64 && cmake --build build -j 4 && ctest --test-dir build --output-on-failure && cargo test --workspace`，全部通过。

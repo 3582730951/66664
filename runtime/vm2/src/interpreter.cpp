@@ -5,10 +5,15 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 
 #include <vmp/runtime/vm1/vm1.h>
+#if VMP_WITH_JIT
+#include <limits>
+#include <vmp/runtime/jit/vm2_jit.h>
+#endif
 
 namespace vmp::runtime::vm2 {
 namespace {
@@ -161,13 +166,32 @@ vmp::runtime::bridge::Domain bridge_domain_from_byte(std::uint8_t raw) {
 
 Vm2Interpreter::Vm2Interpreter() { assert(vmp::runtime::vm1::handler_table_identity() != handler_table_identity()); }
 
-ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
+ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> stop_after_frame_depth) {
   if (context.module == nullptr) throw Vm2Exception(0, "vm2: null module");
   if (context.pc > context.module->code.size()) throw Vm2Exception(context.pc, "vm2: entry pc out of range");
-  bool halted = false;
+  context.execution_halted = false;
   try {
-    while (!halted) {
+    while (!context.execution_halted) {
       if (context.pc >= context.module->code.size()) throw Vm2Exception(context.pc, "vm2: pc out of range");
+#if VMP_WITH_JIT
+      if (context.pc == context.jit_skip_entry_once_pc) {
+        context.jit_skip_entry_once_pc = 0xFFFFFFFFu;
+      } else if (context.module->is_function_entry_pc(context.pc)) {
+        const auto entry_pc = context.pc;
+        const auto hit_count = context.module->note_function_hit(entry_pc);
+        (void)vmp::runtime::jit::Vm2Jit::instance().compile_if_needed(*context.module, context, entry_pc, hit_count);
+        if (context.module->function_jit_entry(entry_pc) != 0u) {
+          const auto next_pc = vmp::runtime::jit::Vm2Jit::instance().dispatch(context, entry_pc);
+          if (next_pc != std::numeric_limits<std::uint32_t>::max()) {
+            context.pc = next_pc;
+            if (context.execution_halted || (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth)) {
+              return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+            }
+            continue;
+          }
+        }
+      }
+#endif
       bool control_flow_changed = false;
       const auto instruction_pc = context.pc;
       std::size_t cursor = context.pc;
@@ -364,8 +388,11 @@ ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
           break;
         }
         case Opcode::bret:
-          leave_call(context, halted);
+          leave_call(context, context.execution_halted);
           control_flow_changed = true;
+          if (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth) {
+            return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+          }
           break;
         case Opcode::pcall: {
           const auto pred = context.module->code.at(cursor++);
@@ -379,8 +406,11 @@ ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
         }
         case Opcode::pret:
           if (context.p[0]) {
-            leave_call(context, halted);
+            leave_call(context, context.execution_halted);
             control_flow_changed = true;
+            if (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth) {
+              return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+            }
           }
           break;
         case Opcode::xcall: {
@@ -411,8 +441,11 @@ ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
           break;
         }
         case Opcode::xret:
-          leave_call(context, halted);
+          leave_call(context, context.execution_halted);
           control_flow_changed = true;
+          if (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth) {
+            return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+          }
           break;
         case Opcode::tsload: {
           const auto dst = context.module->code.at(cursor++);
@@ -433,7 +466,7 @@ ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
           dispatch_audit(context, "vm2_unknown_opcode", "unknown opcode");
           throw Vm2UnknownOpcode(instruction_pc, "vm2: unknown opcode");
       }
-      if (!halted && !control_flow_changed) context.pc = static_cast<std::uint32_t>(cursor);
+      if (!context.execution_halted && !control_flow_changed) context.pc = static_cast<std::uint32_t>(cursor);
     }
     return ExecutionResult{context.r[0], context.d[0], context.q[0]};
   } catch (const Vm2StackOverflow&) {
@@ -448,6 +481,22 @@ ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
     throw;
   }
 }
+
+ExecutionResult Vm2Interpreter::execute(Vm2Context& context) { return execute_impl(context, std::nullopt); }
+
+#if VMP_WITH_JIT
+extern "C" std::uint32_t vmp_vm2_jit_execute_function(Vm2Context* context, std::uint32_t entry_pc) {
+  if (context == nullptr || context->module == nullptr) {
+    return std::numeric_limits<std::uint32_t>::max();
+  }
+  context->pc = entry_pc;
+  context->jit_skip_entry_once_pc = entry_pc;
+  const auto stop_depth = context->frames_.empty() ? std::optional<std::size_t>{} :
+                                                    std::optional<std::size_t>{context->frames_.size() - 1u};
+  (void)execute_impl(*context, stop_depth);
+  return context->execution_halted ? context->pc : context->pc;
+}
+#endif
 
 }  // namespace vmp::runtime::vm2
 

@@ -1,7 +1,7 @@
 # runtime/vm2
 
 - 对应 plan：§6.2 / §6.3 / §6.4 / §9 / §16
-- 当前状态：VM2 独立 ISA、解释器、跨域桥接、字符串句柄、CLI 工具已接线
+- 当前状态：VM2 独立 ISA、解释器、跨域桥接、字符串句柄、函数级 JIT、CLI 工具已接线
 
 ## ISA 摘要
 - 容器头：`VMP2` magic、version、flags、entry_pc、code_size、const_pool_size、`key_context_id[16]`
@@ -36,7 +36,16 @@
 - `bret/xret/异常 unwind` 自动清理未释放 handle
 - 若模块 `key_context_id` 非零，`Vm2Context` 当前 key id 不匹配会触发 `string_pool_error`
 
+## JIT 集成
+- 入口：`runtime/jit/include/vmp/runtime/jit/vm2_jit.h`
+- 粒度：仅函数级；热度来自函数入口（`entry_pc` 与 `blnk/pcall` 目标）
+- 默认阈值：`32` 次函数入口命中后尝试编译
+- 缓存：每模块默认 `4 MiB`
+- 完整性：每个已编译函数都带 `HMAC-SHA256(module_id || entry_pc || compiled_machine_code)` 标签；解释器每次跳入 trampoline 前验证，不通过则自失效并回退解释执行
+- 失效：`key_rotated` / `integrity_failed` / detector 事件 / 模块 key-context 变化都会清空对应 VM2 JIT 项
+- 约束：不消除 predicate 更新；`tsload/tsrelease` 仍是 barrier；不把 VM2 函数入口降级成 native 逻辑
+
 ## DSL / 工具
 - 汇编：`runtime/vm2/asm/`
 - 组装：`build/tools/vmp-vm2-asm input.vm2s output.vm2`
-- 运行：`build/tools/vmp-vm2-run [--audit-path path] [--string-pool ... --string-idx ... --key-env ENV] module.vm2 [args...]`
+- 运行：`build/tools/vmp-vm2-run [--jit=off|c|x64] [--audit-path path] [--string-pool ... --string-idx ... --key-env ENV] module.vm2 [args...]`

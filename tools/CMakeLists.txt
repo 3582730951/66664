@@ -48,6 +48,11 @@ set_target_properties(vmp-vm2-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BI
 
 add_executable(vmp-vm2-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm2_run.cpp)
 target_link_libraries(vmp-vm2-run PRIVATE vmp_runtime_vm2 vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
+if(UNIX AND NOT APPLE)
+  target_link_options(vmp-vm2-run PRIVATE -Wl,--export-dynamic)
+elseif(APPLE)
+  target_link_options(vmp-vm2-run PRIVATE -Wl,-export_dynamic)
+endif()
 set_target_properties(vmp-vm2-run PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 
 

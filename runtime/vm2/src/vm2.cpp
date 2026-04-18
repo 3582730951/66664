@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
@@ -21,6 +22,7 @@
 namespace vmp::runtime::vm2 {
 namespace {
 using ByteVector = std::vector<std::uint8_t>;
+std::atomic<std::uint64_t> g_next_vm2_module_id{1};
 
 struct MemoryOperand {
   std::uint8_t base = 0;
@@ -153,6 +155,98 @@ std::uint64_t read_u64(const ByteVector& bytes, std::size_t& offset) {
 
 std::int32_t read_i32(const ByteVector& bytes, std::size_t& offset) {
   return static_cast<std::int32_t>(read_u32(bytes, offset));
+}
+
+std::size_t decode_instruction_size(const ByteVector& code, std::size_t pc) {
+  std::size_t cursor = pc;
+  const auto opcode = static_cast<Opcode>(read_u16(code, cursor));
+  switch (opcode) {
+    case Opcode::nop:
+    case Opcode::brk:
+    case Opcode::bret:
+    case Opcode::pret:
+    case Opcode::xret:
+      return 2;
+    case Opcode::ftrap:
+      return 6;
+    case Opcode::ildimm:
+      return 11;
+    case Opcode::vldimm:
+      return 7;
+    case Opcode::imov:
+    case Opcode::ineg:
+    case Opcode::inot:
+      return 4;
+    case Opcode::tsrelease:
+      return 3;
+    case Opcode::iadd:
+    case Opcode::isub:
+    case Opcode::imul:
+    case Opcode::idiv:
+    case Opcode::imod:
+    case Opcode::iand:
+    case Opcode::ior:
+    case Opcode::ixor:
+    case Opcode::ishl:
+    case Opcode::ishr:
+    case Opcode::isar:
+    case Opcode::vadd128:
+    case Opcode::vsub128:
+    case Opcode::vmul128:
+    case Opcode::vxor128:
+      return 5;
+    case Opcode::imemld8:
+    case Opcode::imemld16:
+    case Opcode::imemld32:
+    case Opcode::imemld64:
+    case Opcode::imemst8:
+    case Opcode::imemst16:
+    case Opcode::imemst32:
+    case Opcode::imemst64:
+    case Opcode::vmemld128:
+    case Opcode::vmemst128:
+      return 8;
+    case Opcode::jmp:
+      return 6;
+    case Opcode::jp:
+    case Opcode::jnp:
+      return 7;
+    case Opcode::blnk:
+      return 7;
+    case Opcode::pcall:
+      return 8;
+    case Opcode::xcall:
+      return 10;
+    case Opcode::tsload:
+      return 7;
+  }
+  throw std::runtime_error("vm2: unknown opcode while collecting function entries");
+}
+
+std::unordered_set<std::uint32_t> collect_function_entries(const ByteVector& code, std::uint32_t entry_pc) {
+  std::unordered_set<std::uint32_t> entries{entry_pc};
+  std::size_t pc = 0;
+  while (pc < code.size()) {
+    std::size_t cursor = pc;
+    const auto opcode = static_cast<Opcode>(read_u16(code, cursor));
+    switch (opcode) {
+      case Opcode::blnk: {
+        const auto target = read_u32(code, cursor);
+        entries.insert(target);
+        break;
+      }
+      case Opcode::pcall: {
+        ++cursor;
+        const auto target = read_u32(code, cursor);
+        entries.insert(target);
+        break;
+      }
+      default:
+        break;
+    }
+    pc += decode_instruction_size(code, pc);
+  }
+  return entries;
 }
 
 std::int64_t parse_i64(const std::string& text) {
@@ -587,6 +681,8 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   offset += const_pool_size;
   std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), kVm2KeyContextIdSize, module.key_context_id.begin());
   if (module.entry_pc > module.code.size()) throw std::runtime_error("vm2: entry_pc out of range");
+  module.runtime_id = g_next_vm2_module_id.fetch_add(1);
+  module.function_entries = collect_function_entries(module.code, module.entry_pc);
   return module;
 }
 
@@ -730,8 +826,18 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         append_u32(module.code, static_cast<std::uint32_t>(parse_u64_value(inst.operands.at(1))));
         break;
+      case Opcode::tsrelease:
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        break;
     }
   }
+  if (auto it = program.labels.find("entry"); it != program.labels.end()) {
+    module.entry_pc = it->second;
+  } else {
+    module.entry_pc = 0;
+  }
+  module.runtime_id = g_next_vm2_module_id.fetch_add(1);
+  module.function_entries = collect_function_entries(module.code, module.entry_pc);
   return module;
 }
 
