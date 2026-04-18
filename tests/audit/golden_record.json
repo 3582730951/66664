@@ -1,0 +1,14 @@
+{
+  "event_date": "2026-04-18",
+  "event_time": "12:34:56",
+  "thread_id": 88,
+  "event_type": "hw_breakpoint",
+  "program_counter": 4096,
+  "module_name": "game.dll",
+  "symbol_name": "verify_score",
+  "symbol_offset": 36,
+  "arch": "x64",
+  "platform": "windows",
+  "process_id": 1234,
+  "context_note": "detector_reported_debug_register_event"
+}

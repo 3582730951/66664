@@ -1,0 +1,1 @@
+[2026-04-18] [12:34:56] [windows] [x64] [pid=1234] [tid=88] [hw_breakpoint] [pc=0x1000] [module=game.dll] [symbol=verify_score] [offset=+0x24] [note=detector_reported_debug_register_event]

@@ -27,3 +27,24 @@ set_tests_properties(vmp_protect_dump_schema PROPERTIES PASS_REGULAR_EXPRESSION 
 add_test(NAME dummy_vmp_clang_not_implemented
   COMMAND ${CMAKE_BINARY_DIR}/tools/vmp-clang)
 set_tests_properties(dummy_vmp_clang_not_implemented PROPERTIES PASS_REGULAR_EXPRESSION "NOT_IMPLEMENTED")
+
+
+add_executable(audit_cpp_test ${CMAKE_CURRENT_SOURCE_DIR}/audit/audit_cpp_test.cpp)
+target_link_libraries(audit_cpp_test PRIVATE vmp_runtime_audit nlohmann_json::nlohmann_json)
+set_target_properties(audit_cpp_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(audit_cpp_format ${CMAKE_CURRENT_SOURCE_DIR}/audit/audit_cpp_format.cpp)
+target_link_libraries(audit_cpp_format PRIVATE vmp_runtime_audit nlohmann_json::nlohmann_json)
+set_target_properties(audit_cpp_format PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_test(NAME audit_cpp_test
+  COMMAND ${CMAKE_BINARY_DIR}/tests/audit_cpp_test)
+set_tests_properties(audit_cpp_test PROPERTIES PASS_REGULAR_EXPRESSION "audit_cpp_test OK")
+
+add_test(NAME cross_language_golden
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/audit/compare_cpp_rust_audit.py ${CMAKE_BINARY_DIR}/tests/audit_cpp_format ${CMAKE_CURRENT_SOURCE_DIR}/audit/golden_record.json)
+set_tests_properties(cross_language_golden PROPERTIES PASS_REGULAR_EXPRESSION "cross language audit golden OK")
+
+add_test(NAME vmp_protect_detector_selftest
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/audit/assert_detector_selftest.py ${CMAKE_BINARY_DIR}/tools/vmp-protect ${CMAKE_BINARY_DIR}/tests/detector_selftest.log)
+set_tests_properties(vmp_protect_detector_selftest PROPERTIES PASS_REGULAR_EXPRESSION "detector selftest OK")

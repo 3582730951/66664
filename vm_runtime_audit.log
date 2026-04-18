@@ -1,0 +1,6 @@
+[2026-04-18] [10:00:00] [linux] [x64] [pid=4242] [tid=101] [hw_breakpoint] [pc=0x1111] [module=vm_core] [symbol=sensitive_entry] [offset=+0x4] [note=selftest_hw]
+[2026-04-18] [10:00:01] [linux] [x64] [pid=4242] [tid=102] [integrity_mismatch] [pc=0x2222] [module=vm_core] [symbol=checksum_guard] [offset=-0x8] [note=selftest_integrity]
+[2026-04-18] [10:00:02] [linux] [x64] [pid=4242] [tid=103] [unknown] [pc=0x0] [module=] [symbol=] [offset=+0x0] [note=selftest_unknown]
+[2026-04-18] [10:00:00] [linux] [x64] [pid=4242] [tid=101] [hw_breakpoint] [pc=0x1111] [module=vm_core] [symbol=sensitive_entry] [offset=+0x4] [note=selftest_hw]
+[2026-04-18] [10:00:01] [linux] [x64] [pid=4242] [tid=102] [integrity_mismatch] [pc=0x2222] [module=vm_core] [symbol=checksum_guard] [offset=-0x8] [note=selftest_integrity]
+[2026-04-18] [10:00:02] [linux] [x64] [pid=4242] [tid=103] [unknown] [pc=0x0] [module=] [symbol=] [offset=+0x0] [note=selftest_unknown]

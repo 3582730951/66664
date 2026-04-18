@@ -110,3 +110,48 @@
   - `cargo test --workspace`：成功。
 - 未完成项：无（本轮子任务范围内）。
 - 下一子任务建议：等待 supervisor 指定下一轮 CI/跨平台修复项。
+
+### subtask_03
+- 本轮清单：
+  - 实现 `runtime/audit/` C++ 审计运行时：`AnalysisEventRecord`、`make_event(...)`、结构化单行格式化、append-only `AuditWriter`、`IDetector`/`NullDetector`、`ReactionDispatcher`、占位 hook 初始化。
+  - 实现 `runtime/audit/rust_audit/` Rust 镜像：同构 `AnalysisEventRecord + serde`、逐字节等价 `format_line()`、`AuditWriter`、`ReactionDispatcher`、可注入 delayed-exit hook、`format_record` example。
+  - 将 `vmp-protect` 扩展为支持 `--detector-selftest`：用 `NullDetector` 注入 3 条假事件，经 `audit_then_delayed_exit` 完整走通审计 + delayed-exit hook（测试下注入 flag，不真实退出）。
+  - 新增 `tests/audit/`：C++ 精确格式/失败静默/并发写入/策略分发/null detector/placeholder，Rust 精确格式与跨语言 golden，CLI selftest 校验日志 3 行。
+  - 更新 `runtime/audit/README.md`：补充行格式 EBNF、字段语义、默认路径、线程安全与失败静默策略。
+- 变更文件：
+  - `runtime/audit/CMakeLists.txt`
+  - `runtime/audit/README.md`
+  - `runtime/audit/include/vmp/runtime/audit/audit.h`
+  - `runtime/audit/include/vmp/runtime/audit/detector.h`
+  - `runtime/audit/include/vmp/runtime/audit/placeholder.h`
+  - `runtime/audit/include/vmp/runtime/audit/reaction.h`
+  - `runtime/audit/src/audit.cpp`
+  - `runtime/audit/src/detector.cpp`
+  - `runtime/audit/src/placeholder.cpp`
+  - `runtime/audit/src/reaction.cpp`
+  - `runtime/audit/rust_audit/Cargo.toml`
+  - `runtime/audit/rust_audit/examples/format_record.rs`
+  - `runtime/audit/rust_audit/src/lib.rs`
+  - `runtime/audit/rust_audit/tests/format_tests.rs`
+  - `tests/CMakeLists.txt`
+  - `tests/audit/assert_detector_selftest.py`
+  - `tests/audit/audit_cpp_format.cpp`
+  - `tests/audit/audit_cpp_test.cpp`
+  - `tests/audit/compare_cpp_rust_audit.py`
+  - `tests/audit/golden_line.txt`
+  - `tests/audit/golden_record.json`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_protect.cpp`
+  - `STATUS.md`
+- 未完成项：
+  - `ReactionPolicy::{log,degrade,decoy_terminate}` 仅保留 enum 与 dispatcher 分支/TODO；详细状态机仍待后续子任务。
+  - 真 detector（硬件断点、完整性异常、maps 篡改等）尚未实现；本轮只交付接口与 `NullDetector`。
+  - Android/iOS loader 真入口未接入；`default_path()` 仅保留平台骨架与环境变量注入点。
+- 下一子任务建议：
+  - 进入 state machine / 真 detector 子任务：将 `log/degrade/decoy_terminate` 细化为可验证反应路径，并把后续硬件断点 detector 接到当前 audit sink 上，继续遵守 owner override 的 `hw_breakpoint => audit_then_delayed_exit`。
+- 验证：
+  - `cmake --build build-linux-x64 -j`：通过。
+  - `cd build-linux-x64 && ctest --output-on-failure`：`9/9` 全绿。
+  - `cargo test --workspace`：全绿；`rust_audit` 5 个测试通过。
+  - `./build-linux-x64/tools/vmp-protect --detector-selftest`：退出码 `0`，输出 `audit:ok exits_triggered=3`。
+  - `./vm_runtime_audit.log`：共 `3` 行，且 `hw_breakpoint` / `integrity_mismatch` / `unknown` 各 `1` 行。
