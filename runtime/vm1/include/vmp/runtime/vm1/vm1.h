@@ -1,9 +1,162 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+#include <vector>
+
+#include <vmp/runtime/audit/reaction.h>
+#include <vmp/runtime/bridge/bridge.h>
+#include <vmp/runtime/vm1/isa.h>
+
 namespace vmp::runtime::vm1 {
+
+struct KeyContext {
+  std::uint64_t primary = 0;
+  std::uint64_t secondary = 0;
+};
+
+struct VmFlags {
+  bool zero = false;
+  bool neg = false;
+  bool carry = false;
+  bool overflow = false;
+};
+
+enum class VmTrapCode {
+  trap_instruction,
+  out_of_bounds,
+  divide_by_zero,
+  unknown_opcode,
+  stack_overflow,
+  invalid_module,
+  invalid_constant,
+  invalid_register,
+  bridge_error,
+};
+
+class VmException : public std::runtime_error {
+ public:
+  VmException(VmTrapCode code, std::uint32_t pc, std::string message);
+
+  VmTrapCode code() const noexcept { return code_; }
+  std::uint32_t pc() const noexcept { return pc_; }
+
+ private:
+  VmTrapCode code_;
+  std::uint32_t pc_;
+};
+
+struct ConstPoolEntry {
+  ConstKind kind = ConstKind::none;
+  std::vector<std::uint8_t> bytes;
+};
+
+class Vm1Module {
+ public:
+  std::uint16_t version = kVm1Version;
+  std::uint16_t module_flags = 0;
+  std::uint32_t entry_pc = 0;
+  std::vector<std::uint8_t> code;
+  std::vector<ConstPoolEntry> const_pool;
+
+  static Vm1Module load_from_file(const std::string& path);
+  static Vm1Module load_from_bytes(const std::vector<std::uint8_t>& bytes);
+
+  std::vector<std::uint8_t> serialize() const;
+  void save_to_file(const std::string& path) const;
+};
+
+struct ExecutionResult {
+  std::uint64_t ret_int = 0;
+  double ret_float = 0.0;
+};
+
+class Vm1Context {
+ public:
+  explicit Vm1Context(const Vm1Module& module, std::size_t stack_size = kVm1DefaultStackSize);
+
+  std::array<std::uint64_t, kVm1GeneralRegisterCount> vr{};
+  std::array<double, kVm1FloatRegisterCount> vfr{};
+  std::uint32_t pc = 0;
+  std::uint64_t sp = 0;
+  VmFlags flags{};
+  const Vm1Module* module = nullptr;
+  KeyContext key_context{};
+  vmp::runtime::bridge::BridgeRegistry* bridge_registry = nullptr;
+  vmp::runtime::audit::ReactionDispatcher* audit_dispatcher = nullptr;
+  int max_bridge_depth = 64;
+
+  std::size_t stack_size() const noexcept;
+  std::uint64_t stack_top() const noexcept;
+  void set_stack_top(std::uint64_t value);
+
+  template <typename T>
+  T read_memory(std::uint64_t address) const;
+
+  template <typename T>
+  void write_memory(std::uint64_t address, T value);
+
+  std::uint64_t materialize_transient_string(std::uint32_t id);
+  std::string transient_string(std::uint64_t handle) const;
+
+ public:
+  friend class Vm1Interpreter;
+
+  struct CallFrame {
+    std::array<std::uint64_t, kVm1GeneralRegisterCount> vr{};
+    std::array<double, kVm1FloatRegisterCount> vfr{};
+    VmFlags flags{};
+    std::uint32_t return_pc = 0;
+    std::uint64_t caller_sp = 0;
+    std::uint64_t caller_stack_top = 0;
+    std::uint8_t arg_count = 0;
+  };
+
+  void ensure_memory_range(std::uint64_t address, std::size_t width) const;
+
+  std::vector<std::uint8_t> stack_;
+  std::uint64_t stack_top_ = 0;
+  std::vector<CallFrame> frames_;
+  std::unordered_map<std::uint64_t, std::string> transient_strings_;
+  std::uint64_t next_transient_handle_ = 1;
+};
+
+class Vm1Interpreter {
+ public:
+  ExecutionResult execute(Vm1Context& context);
+};
+
+Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags = 0);
+std::string disassemble_module(const Vm1Module& module);
+std::string opcode_name(Opcode opcode);
 
 struct Facade {
   const char* status() const noexcept;
 };
+
+template <typename T>
+T Vm1Context::read_memory(std::uint64_t address) const {
+  ensure_memory_range(address, sizeof(T));
+  T value{};
+  for (std::size_t i = 0; i < sizeof(T); ++i) {
+    value = static_cast<T>(value | (static_cast<T>(stack_[static_cast<std::size_t>(address + i)]) << (i * 8)));
+  }
+  return value;
+}
+
+template <typename T>
+void Vm1Context::write_memory(std::uint64_t address, T value) {
+  ensure_memory_range(address, sizeof(T));
+  for (std::size_t i = 0; i < sizeof(T); ++i) {
+    stack_[static_cast<std::size_t>(address + i)] =
+        static_cast<std::uint8_t>((static_cast<std::uint64_t>(value) >> (i * 8)) & 0xFFu);
+  }
+}
 
 }  // namespace vmp::runtime::vm1

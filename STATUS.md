@@ -276,3 +276,49 @@
   - 远端 GH Actions 结果尚待 supervisor 观察；若仍有 Windows-only 特例（例如 MSVC/clang-cl 工具链细节），进入下一轮再修。
 - 下一子任务建议：
   - 等待 supervisor 回看最新 GH Actions；若 Windows runner 仍有特殊失败，优先抓取对应 job 的 CTest command line / stderr 做定点修复。
+
+### subtask_05
+- 本轮清单：
+  - 实现 `runtime/vm1/` 的 VM1 ISA 定义：32 个通用寄存器、4 个浮点寄存器、`pc/sp/flags`、算术/位运算、显式宽度 load/store、控制流、`domain_call/domain_ret`、`load_transient_string`、模块头/常量池格式。
+  - 实现 `Vm1Module` 加载/保存/序列化、文本 DSL 汇编器 `assemble_module_text()`、反汇编 `disassemble_module()`。
+  - 实现 `Vm1Context` + `Vm1Interpreter`：私有线程栈（默认 64KiB）、寄存器快照式调用帧、溢出参数栈区、switch-in-loop dispatch、越界/除零/未知 opcode/stack overflow 等异常路径。
+  - 实现 `runtime/vm1/include/vmp/runtime/bridge/bridge.h` 与 `BridgeRegistry`：`native↔vm1` / `vm1↔vm1` 最小跨域 ABI、`max_depth` 保护、异常状态映射与 `last_domain_exception()`。
+  - 实现工具：`vmp-vm1-asm`、`vmp-vm1-run`。
+  - 实现 audit 集成：`breakpoint -> vm1_breakpoint`、`trap -> vm1_trap`、`unknown opcode -> vm1_unknown_opcode`、`stack overflow -> vm1_stack_overflow`，统一 `audit_only`。
+  - 新增 `tests/runtime_vm1/` 真测：round-trip、arith、control_flow、call/ret、cross-domain、exceptions、breakpoint、bench、CLI fib20。
+  - 更新 `runtime/vm1/README.md`：ISA、字节码格式、DSL、跨域 ABI 文档。
+- 本轮变更文件：
+  - `runtime/vm1/CMakeLists.txt`
+  - `runtime/vm1/README.md`
+  - `runtime/vm1/include/vmp/runtime/bridge/bridge.h`
+  - `runtime/vm1/include/vmp/runtime/vm1/isa.h`
+  - `runtime/vm1/include/vmp/runtime/vm1/vm1.h`
+  - `runtime/vm1/src/bridge.cpp`
+  - `runtime/vm1/src/interpreter.cpp`
+  - `runtime/vm1/src/vm1.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/runtime_vm1/test_common.h`
+  - `tests/runtime_vm1/vm1_asm_round_trip.cpp`
+  - `tests/runtime_vm1/vm1_arith_ops.cpp`
+  - `tests/runtime_vm1/vm1_control_flow.cpp`
+  - `tests/runtime_vm1/vm1_call_ret.cpp`
+  - `tests/runtime_vm1/vm1_cross_domain_call.cpp`
+  - `tests/runtime_vm1/vm1_exceptions.cpp`
+  - `tests/runtime_vm1/vm1_breakpoint_event.cpp`
+  - `tests/runtime_vm1/bench/vm1_bench.cpp`
+  - `tests/runtime_vm1/fixtures/fib20.vm1s`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_vm1_asm.cpp`
+  - `tools/src/vmp_vm1_run.cpp`
+  - `STATUS.md`
+- 未完成项：
+  - 本轮要求范围内无未完成项。
+  - `vm2` / JIT / 真字符串保护 / 更复杂对象句柄桥接仍留待后续指定子任务。
+- 下一子任务建议：
+  - 等待 supervisor 指定下一轮（建议后续对接 `VM_string` 真瞬时解密链或 VM2 独立 ISA/解释器子任务）。
+- 验证：
+  - `cd /workspace/vmp && cmake --build build -j`：通过。
+  - `cd /workspace/vmp && ctest --test-dir build --output-on-failure`：`30/30` 通过。
+  - `cd /workspace/vmp && cargo test --workspace`：通过。
+  - `cd /workspace/vmp && ./build/tools/vmp-vm1-asm tests/runtime_vm1/fixtures/fib20.vm1s /tmp/fib20.vm1 && ./build/tools/vmp-vm1-run /tmp/fib20.vm1 20`：输出 `ret_int=6765 ret_float=0`。
+  - `cd /tmp/vmp_ci_sim && ctest --test-dir build --output-on-failure && cargo test --workspace`：全部通过。

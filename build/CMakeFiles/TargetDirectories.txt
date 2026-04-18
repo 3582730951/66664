@@ -108,6 +108,8 @@
 /workspace/vmp/build/tools/CMakeFiles/vmp-clang++.dir
 /workspace/vmp/build/tools/CMakeFiles/vmp-link.dir
 /workspace/vmp/build/tools/CMakeFiles/vmp-protect.dir
+/workspace/vmp/build/tools/CMakeFiles/vmp-vm1-asm.dir
+/workspace/vmp/build/tools/CMakeFiles/vmp-vm1-run.dir
 /workspace/vmp/build/tools/CMakeFiles/test.dir
 /workspace/vmp/build/tools/CMakeFiles/edit_cache.dir
 /workspace/vmp/build/tools/CMakeFiles/rebuild_cache.dir
@@ -115,6 +117,14 @@
 /workspace/vmp/build/tests/CMakeFiles/policy_cpp_summary.dir
 /workspace/vmp/build/tests/CMakeFiles/audit_cpp_test.dir
 /workspace/vmp/build/tests/CMakeFiles/audit_cpp_format.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_asm_round_trip.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_arith_ops.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_control_flow.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_call_ret.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_cross_domain_call.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_exceptions.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_breakpoint_event.dir
+/workspace/vmp/build/tests/CMakeFiles/vm1_bench.dir
 /workspace/vmp/build/tests/CMakeFiles/test.dir
 /workspace/vmp/build/tests/CMakeFiles/edit_cache.dir
 /workspace/vmp/build/tests/CMakeFiles/rebuild_cache.dir

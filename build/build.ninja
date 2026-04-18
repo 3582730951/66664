@@ -522,13 +522,29 @@ build runtime/rebuild_cache: phony runtime/CMakeFiles/rebuild_cache.util
 #############################################
 # Order-only phony target for vmp_runtime_vm1
 
-build cmake_object_order_depends_target_vmp_runtime_vm1: phony || cmake_object_order_depends_target_vmp_analyzer cmake_object_order_depends_target_vmp_planner cmake_object_order_depends_target_vmp_policy
+build cmake_object_order_depends_target_vmp_runtime_vm1: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit
 
 build runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/vm1.cpp.o: CXX_COMPILER__vmp_runtime_vm1_ /workspace/vmp/runtime/vm1/src/vm1.cpp || cmake_object_order_depends_target_vmp_runtime_vm1
   DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
   DEP_FILE = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/vm1.cpp.o.d
   FLAGS = -std=gnu++17
-  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/planner/include -I/workspace/vmp/analyzer/include -I/workspace/vmp/policy/include
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir
+  OBJECT_FILE_DIR = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src
+
+build runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/interpreter.cpp.o: CXX_COMPILER__vmp_runtime_vm1_ /workspace/vmp/runtime/vm1/src/interpreter.cpp || cmake_object_order_depends_target_vmp_runtime_vm1
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/interpreter.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir
+  OBJECT_FILE_DIR = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src
+
+build runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/bridge.cpp.o: CXX_COMPILER__vmp_runtime_vm1_ /workspace/vmp/runtime/vm1/src/bridge.cpp || cmake_object_order_depends_target_vmp_runtime_vm1
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/bridge.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
   OBJECT_DIR = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir
   OBJECT_FILE_DIR = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src
 
@@ -540,7 +556,7 @@ build runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/vm1.cpp.o: CXX_COMPILER__vm
 #############################################
 # Link the static library runtime/vm1/libvmp_runtime_vm1.a
 
-build runtime/vm1/libvmp_runtime_vm1.a: CXX_STATIC_LIBRARY_LINKER__vmp_runtime_vm1_ runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/vm1.cpp.o || analyzer/libvmp_analyzer.a planner/libvmp_planner.a policy/libvmp_policy.a
+build runtime/vm1/libvmp_runtime_vm1.a: CXX_STATIC_LIBRARY_LINKER__vmp_runtime_vm1_ runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/vm1.cpp.o runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/interpreter.cpp.o runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir/src/bridge.cpp.o || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a
   OBJECT_DIR = runtime/vm1/CMakeFiles/vmp_runtime_vm1.dir
   POST_BUILD = :
   PRE_LINK = :
@@ -2028,6 +2044,72 @@ build tools/vmp-protect: CXX_EXECUTABLE_LINKER__vmp-protect_ tools/CMakeFiles/vm
   TARGET_FILE = tools/vmp-protect
   TARGET_PDB = vmp-protect.dbg
 
+# =============================================================================
+# Object build statements for EXECUTABLE target vmp-vm1-asm
+
+
+#############################################
+# Order-only phony target for vmp-vm1-asm
+
+build cmake_object_order_depends_target_vmp-vm1-asm: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tools/CMakeFiles/vmp-vm1-asm.dir/src/vmp_vm1_asm.cpp.o: CXX_COMPILER__vmp-vm1-asm_ /workspace/vmp/tools/src/vmp_vm1_asm.cpp || cmake_object_order_depends_target_vmp-vm1-asm
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tools/CMakeFiles/vmp-vm1-asm.dir/src/vmp_vm1_asm.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tools/CMakeFiles/vmp-vm1-asm.dir
+  OBJECT_FILE_DIR = tools/CMakeFiles/vmp-vm1-asm.dir/src
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vmp-vm1-asm
+
+
+#############################################
+# Link the executable tools/vmp-vm1-asm
+
+build tools/vmp-vm1-asm: CXX_EXECUTABLE_LINKER__vmp-vm1-asm_ tools/CMakeFiles/vmp-vm1-asm.dir/src/vmp_vm1_asm.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tools/CMakeFiles/vmp-vm1-asm.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tools/vmp-vm1-asm
+  TARGET_PDB = vmp-vm1-asm.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vmp-vm1-run
+
+
+#############################################
+# Order-only phony target for vmp-vm1-run
+
+build cmake_object_order_depends_target_vmp-vm1-run: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tools/CMakeFiles/vmp-vm1-run.dir/src/vmp_vm1_run.cpp.o: CXX_COMPILER__vmp-vm1-run_ /workspace/vmp/tools/src/vmp_vm1_run.cpp || cmake_object_order_depends_target_vmp-vm1-run
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tools/CMakeFiles/vmp-vm1-run.dir/src/vmp_vm1_run.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tools/CMakeFiles/vmp-vm1-run.dir
+  OBJECT_FILE_DIR = tools/CMakeFiles/vmp-vm1-run.dir/src
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vmp-vm1-run
+
+
+#############################################
+# Link the executable tools/vmp-vm1-run
+
+build tools/vmp-vm1-run: CXX_EXECUTABLE_LINKER__vmp-vm1-run_ tools/CMakeFiles/vmp-vm1-run.dir/src/vmp_vm1_run.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tools/CMakeFiles/vmp-vm1-run.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tools/vmp-vm1-run
+  TARGET_PDB = vmp-vm1-run.dbg
+
 
 #############################################
 # Utility command for test
@@ -2200,6 +2282,270 @@ build tests/audit_cpp_format: CXX_EXECUTABLE_LINKER__audit_cpp_format_ tests/CMa
   TARGET_FILE = tests/audit_cpp_format
   TARGET_PDB = audit_cpp_format.dbg
 
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_asm_round_trip
+
+
+#############################################
+# Order-only phony target for vm1_asm_round_trip
+
+build cmake_object_order_depends_target_vm1_asm_round_trip: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_asm_round_trip.dir/runtime_vm1/vm1_asm_round_trip.cpp.o: CXX_COMPILER__vm1_asm_round_trip_ /workspace/vmp/tests/runtime_vm1/vm1_asm_round_trip.cpp || cmake_object_order_depends_target_vm1_asm_round_trip
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_asm_round_trip.dir/runtime_vm1/vm1_asm_round_trip.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_asm_round_trip.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_asm_round_trip.dir/runtime_vm1
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_asm_round_trip
+
+
+#############################################
+# Link the executable tests/vm1_asm_round_trip
+
+build tests/vm1_asm_round_trip: CXX_EXECUTABLE_LINKER__vm1_asm_round_trip_ tests/CMakeFiles/vm1_asm_round_trip.dir/runtime_vm1/vm1_asm_round_trip.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_asm_round_trip.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_asm_round_trip
+  TARGET_PDB = vm1_asm_round_trip.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_arith_ops
+
+
+#############################################
+# Order-only phony target for vm1_arith_ops
+
+build cmake_object_order_depends_target_vm1_arith_ops: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_arith_ops.dir/runtime_vm1/vm1_arith_ops.cpp.o: CXX_COMPILER__vm1_arith_ops_ /workspace/vmp/tests/runtime_vm1/vm1_arith_ops.cpp || cmake_object_order_depends_target_vm1_arith_ops
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_arith_ops.dir/runtime_vm1/vm1_arith_ops.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_arith_ops.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_arith_ops.dir/runtime_vm1
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_arith_ops
+
+
+#############################################
+# Link the executable tests/vm1_arith_ops
+
+build tests/vm1_arith_ops: CXX_EXECUTABLE_LINKER__vm1_arith_ops_ tests/CMakeFiles/vm1_arith_ops.dir/runtime_vm1/vm1_arith_ops.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_arith_ops.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_arith_ops
+  TARGET_PDB = vm1_arith_ops.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_control_flow
+
+
+#############################################
+# Order-only phony target for vm1_control_flow
+
+build cmake_object_order_depends_target_vm1_control_flow: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_control_flow.dir/runtime_vm1/vm1_control_flow.cpp.o: CXX_COMPILER__vm1_control_flow_ /workspace/vmp/tests/runtime_vm1/vm1_control_flow.cpp || cmake_object_order_depends_target_vm1_control_flow
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_control_flow.dir/runtime_vm1/vm1_control_flow.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_control_flow.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_control_flow.dir/runtime_vm1
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_control_flow
+
+
+#############################################
+# Link the executable tests/vm1_control_flow
+
+build tests/vm1_control_flow: CXX_EXECUTABLE_LINKER__vm1_control_flow_ tests/CMakeFiles/vm1_control_flow.dir/runtime_vm1/vm1_control_flow.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_control_flow.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_control_flow
+  TARGET_PDB = vm1_control_flow.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_call_ret
+
+
+#############################################
+# Order-only phony target for vm1_call_ret
+
+build cmake_object_order_depends_target_vm1_call_ret: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_call_ret.dir/runtime_vm1/vm1_call_ret.cpp.o: CXX_COMPILER__vm1_call_ret_ /workspace/vmp/tests/runtime_vm1/vm1_call_ret.cpp || cmake_object_order_depends_target_vm1_call_ret
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_call_ret.dir/runtime_vm1/vm1_call_ret.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_call_ret.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_call_ret.dir/runtime_vm1
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_call_ret
+
+
+#############################################
+# Link the executable tests/vm1_call_ret
+
+build tests/vm1_call_ret: CXX_EXECUTABLE_LINKER__vm1_call_ret_ tests/CMakeFiles/vm1_call_ret.dir/runtime_vm1/vm1_call_ret.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_call_ret.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_call_ret
+  TARGET_PDB = vm1_call_ret.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_cross_domain_call
+
+
+#############################################
+# Order-only phony target for vm1_cross_domain_call
+
+build cmake_object_order_depends_target_vm1_cross_domain_call: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_cross_domain_call.dir/runtime_vm1/vm1_cross_domain_call.cpp.o: CXX_COMPILER__vm1_cross_domain_call_ /workspace/vmp/tests/runtime_vm1/vm1_cross_domain_call.cpp || cmake_object_order_depends_target_vm1_cross_domain_call
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_cross_domain_call.dir/runtime_vm1/vm1_cross_domain_call.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_cross_domain_call.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_cross_domain_call.dir/runtime_vm1
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_cross_domain_call
+
+
+#############################################
+# Link the executable tests/vm1_cross_domain_call
+
+build tests/vm1_cross_domain_call: CXX_EXECUTABLE_LINKER__vm1_cross_domain_call_ tests/CMakeFiles/vm1_cross_domain_call.dir/runtime_vm1/vm1_cross_domain_call.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_cross_domain_call.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_cross_domain_call
+  TARGET_PDB = vm1_cross_domain_call.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_exceptions
+
+
+#############################################
+# Order-only phony target for vm1_exceptions
+
+build cmake_object_order_depends_target_vm1_exceptions: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_exceptions.dir/runtime_vm1/vm1_exceptions.cpp.o: CXX_COMPILER__vm1_exceptions_ /workspace/vmp/tests/runtime_vm1/vm1_exceptions.cpp || cmake_object_order_depends_target_vm1_exceptions
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_exceptions.dir/runtime_vm1/vm1_exceptions.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_exceptions.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_exceptions.dir/runtime_vm1
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_exceptions
+
+
+#############################################
+# Link the executable tests/vm1_exceptions
+
+build tests/vm1_exceptions: CXX_EXECUTABLE_LINKER__vm1_exceptions_ tests/CMakeFiles/vm1_exceptions.dir/runtime_vm1/vm1_exceptions.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_exceptions.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_exceptions
+  TARGET_PDB = vm1_exceptions.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_breakpoint_event
+
+
+#############################################
+# Order-only phony target for vm1_breakpoint_event
+
+build cmake_object_order_depends_target_vm1_breakpoint_event: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_breakpoint_event.dir/runtime_vm1/vm1_breakpoint_event.cpp.o: CXX_COMPILER__vm1_breakpoint_event_ /workspace/vmp/tests/runtime_vm1/vm1_breakpoint_event.cpp || cmake_object_order_depends_target_vm1_breakpoint_event
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_breakpoint_event.dir/runtime_vm1/vm1_breakpoint_event.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_breakpoint_event.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_breakpoint_event.dir/runtime_vm1
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_breakpoint_event
+
+
+#############################################
+# Link the executable tests/vm1_breakpoint_event
+
+build tests/vm1_breakpoint_event: CXX_EXECUTABLE_LINKER__vm1_breakpoint_event_ tests/CMakeFiles/vm1_breakpoint_event.dir/runtime_vm1/vm1_breakpoint_event.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_breakpoint_event.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_breakpoint_event
+  TARGET_PDB = vm1_breakpoint_event.dbg
+
+# =============================================================================
+# Object build statements for EXECUTABLE target vm1_bench
+
+
+#############################################
+# Order-only phony target for vm1_bench
+
+build cmake_object_order_depends_target_vm1_bench: phony || cmake_object_order_depends_target_vmp_policy cmake_object_order_depends_target_vmp_runtime_audit cmake_object_order_depends_target_vmp_runtime_vm1
+
+build tests/CMakeFiles/vm1_bench.dir/runtime_vm1/bench/vm1_bench.cpp.o: CXX_COMPILER__vm1_bench_ /workspace/vmp/tests/runtime_vm1/bench/vm1_bench.cpp || cmake_object_order_depends_target_vm1_bench
+  DEFINES = -DVMP_ARCH_STR=\"x64\" -DVMP_PLATFORM_STR=\"linux\" -DVMP_WITH_JIT=1 -DVMP_WITH_VM2=1
+  DEP_FILE = tests/CMakeFiles/vm1_bench.dir/runtime_vm1/bench/vm1_bench.cpp.o.d
+  FLAGS = -std=gnu++17
+  INCLUDES = -I/workspace/vmp/runtime/vm1/include -I/workspace/vmp/runtime/audit/include -I/workspace/vmp/policy/include
+  OBJECT_DIR = tests/CMakeFiles/vm1_bench.dir
+  OBJECT_FILE_DIR = tests/CMakeFiles/vm1_bench.dir/runtime_vm1/bench
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target vm1_bench
+
+
+#############################################
+# Link the executable tests/vm1_bench
+
+build tests/vm1_bench: CXX_EXECUTABLE_LINKER__vm1_bench_ tests/CMakeFiles/vm1_bench.dir/runtime_vm1/bench/vm1_bench.cpp.o | runtime/vm1/libvmp_runtime_vm1.a runtime/audit/libvmp_runtime_audit.a policy/libvmp_policy.a || policy/libvmp_policy.a runtime/audit/libvmp_runtime_audit.a runtime/vm1/libvmp_runtime_vm1.a
+  LINK_LIBRARIES = runtime/vm1/libvmp_runtime_vm1.a  runtime/audit/libvmp_runtime_audit.a  policy/libvmp_policy.a
+  OBJECT_DIR = tests/CMakeFiles/vm1_bench.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  TARGET_FILE = tests/vm1_bench
+  TARGET_PDB = vm1_bench.dbg
+
 
 #############################################
 # Utility command for test
@@ -2296,6 +2642,22 @@ build policy_cpp_summary: phony tests/policy_cpp_summary
 
 build policy_cpp_test: phony tests/policy_cpp_test
 
+build vm1_arith_ops: phony tests/vm1_arith_ops
+
+build vm1_asm_round_trip: phony tests/vm1_asm_round_trip
+
+build vm1_bench: phony tests/vm1_bench
+
+build vm1_breakpoint_event: phony tests/vm1_breakpoint_event
+
+build vm1_call_ret: phony tests/vm1_call_ret
+
+build vm1_control_flow: phony tests/vm1_control_flow
+
+build vm1_cross_domain_call: phony tests/vm1_cross_domain_call
+
+build vm1_exceptions: phony tests/vm1_exceptions
+
 build vmp-clang: phony tools/vmp-clang
 
 build vmp-clang++: phony tools/vmp-clang++
@@ -2307,6 +2669,10 @@ build vmp-cpp-fallback-scan: phony tools/vmp-cpp-fallback-scan
 build vmp-link: phony tools/vmp-link
 
 build vmp-protect: phony tools/vmp-protect
+
+build vmp-vm1-asm: phony tools/vmp-vm1-asm
+
+build vmp-vm1-run: phony tools/vmp-vm1-run
 
 build vmp_analyzer: phony analyzer/libvmp_analyzer.a
 
@@ -2544,14 +2910,14 @@ build runtime/vm2/all: phony runtime/vm2/libvmp_runtime_vm2.a
 #############################################
 # Folder: /workspace/vmp/build/tests
 
-build tests/all: phony tests/policy_cpp_test tests/policy_cpp_summary tests/audit_cpp_test tests/audit_cpp_format
+build tests/all: phony tests/policy_cpp_test tests/policy_cpp_summary tests/audit_cpp_test tests/audit_cpp_format tests/vm1_asm_round_trip tests/vm1_arith_ops tests/vm1_control_flow tests/vm1_call_ret tests/vm1_cross_domain_call tests/vm1_exceptions tests/vm1_breakpoint_event tests/vm1_bench
 
 # =============================================================================
 
 #############################################
 # Folder: /workspace/vmp/build/tools
 
-build tools/all: phony tools/vmp-clang tools/vmp-clang++ tools/vmp-link tools/vmp-protect
+build tools/all: phony tools/vmp-clang tools/vmp-clang++ tools/vmp-link tools/vmp-protect tools/vmp-vm1-asm tools/vmp-vm1-run
 
 # =============================================================================
 # Built-in targets

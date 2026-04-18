@@ -23,3 +23,11 @@ foreach(target IN ITEMS vmp-clang vmp-clang++)
 endforeach()
 
 target_link_libraries(vmp-protect PRIVATE vmp_policy vmp_runtime_audit)
+
+add_executable(vmp-vm1-asm ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm1_asm.cpp)
+target_link_libraries(vmp-vm1-asm PRIVATE vmp_runtime_vm1)
+set_target_properties(vmp-vm1-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+
+add_executable(vmp-vm1-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm1_run.cpp)
+target_link_libraries(vmp-vm1-run PRIVATE vmp_runtime_vm1 vmp_runtime_audit)
+set_target_properties(vmp-vm1-run PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
