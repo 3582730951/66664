@@ -1,3 +1,3 @@
 pub fn state_status() -> &'static str {
-    "NOT_IMPLEMENTED"
+    "runtime_state_ready"
 }

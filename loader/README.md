@@ -1,6 +1,22 @@
 # loader
 
-- 对应 plan：§2.6
-- 范围：各平台 loader / lifecycle hooks 骨架
-- 当前状态：skeleton
-- TODO：补齐各平台初始化时机、能力检测、生命周期接入
+- 对应 plan：§2.6、§15
+- 范围：平台 loader / lifecycle hooks 真实初始化入口
+- 当前状态：linux/windows ready，android/ios pending
+
+## 初始化目标
+在任何受保护代码运行前完成以下动作：
+1. 初始化本地审计 sink
+2. 接入运行时状态机单例
+3. 恢复字符串主密钥上下文（若环境变量存在）
+4. 调用一次 `vm_placeholder_analysis_awareness_hook()`
+
+## 统一环境变量
+- `VMP_STRING_MASTER_KEY`：十六进制主密钥，供字符串运行时派生子密钥
+- `VMP_AUDIT_PATH`：覆盖默认审计路径
+- `VMP_DISABLE_LOADER`：非空即禁用 loader（测试/宿主环境使用）
+
+## 平台入口
+- Linux：`constructor(101)` + `.init_array` 显式 fallback
+- Windows：TLS callback（`.CRT$XLB`）+ DllMain 风格桥接
+- Android/iOS：后续子任务补齐

@@ -337,3 +337,74 @@ add_test(NAME vmp_vm2_run_fib20
 set_tests_properties(vmp_vm2_run_fib20 PROPERTIES
   DEPENDS vmp_vm2_asm_fib20
   PASS_REGULAR_EXPRESSION "ret_int=6765")
+
+
+# loader tests
+if(UNIX AND NOT APPLE)
+  set(VMP_LOADER_TEST_LOG ${CMAKE_BINARY_DIR}/tests/vmp_loader_selftest.log)
+  set(VMP_LOADER_ENV_LOG /tmp/vmp_loader_test.log)
+  set(VMP_LOADER_DISABLE_LOG ${CMAKE_BINARY_DIR}/tests/vmp_loader_disabled.log)
+  set(VMP_LOADER_PRELOAD_LOG ${CMAKE_BINARY_DIR}/tests/vmp_loader_preload.log)
+
+  add_executable(loader_linux_init_order ${CMAKE_CURRENT_SOURCE_DIR}/loader/loader_linux_init_order.cpp)
+  target_link_libraries(loader_linux_init_order PRIVATE vmp_loader_linux vmp_runtime_state)
+  set_target_properties(loader_linux_init_order PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+  add_test(NAME loader_linux_init_order COMMAND $<TARGET_FILE:loader_linux_init_order>)
+  set_tests_properties(loader_linux_init_order PROPERTIES PASS_REGULAR_EXPRESSION "loader_init_order OK")
+
+  add_executable(loader_preload_probe ${CMAKE_CURRENT_SOURCE_DIR}/loader/loader_preload_probe.cpp)
+  set_target_properties(loader_preload_probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+  add_test(NAME loader_selftest_audit_init
+    COMMAND ${CMAKE_COMMAND} -E env VMP_AUDIT_PATH=${VMP_LOADER_TEST_LOG} $<TARGET_FILE:vmp-loader-selftest>)
+  add_test(NAME loader_selftest_audit_init_check
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_audit_log.py ${VMP_LOADER_TEST_LOG} loader_init)
+  set_tests_properties(loader_selftest_audit_init_check PROPERTIES DEPENDS loader_selftest_audit_init PASS_REGULAR_EXPRESSION "audit log OK")
+
+  add_test(NAME loader_env_override_path
+    COMMAND ${CMAKE_COMMAND} -E env VMP_AUDIT_PATH=${VMP_LOADER_ENV_LOG} $<TARGET_FILE:vmp-loader-selftest>)
+  add_test(NAME loader_env_override_path_check
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_audit_log.py ${VMP_LOADER_ENV_LOG} loader_init)
+  set_tests_properties(loader_env_override_path_check PROPERTIES DEPENDS loader_env_override_path PASS_REGULAR_EXPRESSION "audit log OK")
+
+  add_test(NAME loader_disable
+    COMMAND ${CMAKE_COMMAND} -E env VMP_DISABLE_LOADER=1 VMP_AUDIT_PATH=${VMP_LOADER_DISABLE_LOG} $<TARGET_FILE:vmp-loader-selftest>)
+  add_test(NAME loader_disable_check
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_log_absent.py ${VMP_LOADER_DISABLE_LOG})
+  set_tests_properties(loader_disable_check PROPERTIES DEPENDS loader_disable PASS_REGULAR_EXPRESSION "log absent OK")
+
+  add_test(NAME loader_linux_shared_lib_preload
+    COMMAND ${CMAKE_COMMAND} -E env LD_PRELOAD=$<TARGET_FILE:vmp_loader_linux> VMP_AUDIT_PATH=${VMP_LOADER_PRELOAD_LOG} $<TARGET_FILE:loader_preload_probe>)
+  add_test(NAME loader_linux_shared_lib_preload_check
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_audit_log.py ${VMP_LOADER_PRELOAD_LOG} loader_init)
+  set_tests_properties(loader_linux_shared_lib_preload_check PROPERTIES DEPENDS loader_linux_shared_lib_preload PASS_REGULAR_EXPRESSION "audit log OK")
+endif()
+
+if(WIN32)
+  set(VMP_LOADER_TEST_LOG $ENV{TEMP}/vmp_loader_selftest.log)
+  set(VMP_LOADER_ENV_LOG $ENV{TEMP}/vmp_loader_test.log)
+  set(VMP_LOADER_DISABLE_LOG $ENV{TEMP}/vmp_loader_disabled.log)
+
+  add_test(NAME loader_selftest_audit_init
+    COMMAND ${CMAKE_COMMAND} -E env VMP_AUDIT_PATH=${VMP_LOADER_TEST_LOG} $<TARGET_FILE:vmp-loader-selftest>)
+  add_test(NAME loader_selftest_audit_init_check
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_audit_log.py ${VMP_LOADER_TEST_LOG} loader_init)
+  set_tests_properties(loader_selftest_audit_init_check PROPERTIES DEPENDS loader_selftest_audit_init PASS_REGULAR_EXPRESSION "audit log OK")
+
+  add_test(NAME loader_env_override_path
+    COMMAND ${CMAKE_COMMAND} -E env VMP_AUDIT_PATH=${VMP_LOADER_ENV_LOG} $<TARGET_FILE:vmp-loader-selftest>)
+  add_test(NAME loader_env_override_path_check
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_audit_log.py ${VMP_LOADER_ENV_LOG} loader_init)
+  set_tests_properties(loader_env_override_path_check PROPERTIES DEPENDS loader_env_override_path PASS_REGULAR_EXPRESSION "audit log OK")
+
+  add_test(NAME loader_disable
+    COMMAND ${CMAKE_COMMAND} -E env VMP_DISABLE_LOADER=1 VMP_AUDIT_PATH=${VMP_LOADER_DISABLE_LOG} $<TARGET_FILE:vmp-loader-selftest>)
+  add_test(NAME loader_disable_check
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/assert_log_absent.py ${VMP_LOADER_DISABLE_LOG})
+  set_tests_properties(loader_disable_check PROPERTIES DEPENDS loader_disable PASS_REGULAR_EXPRESSION "log absent OK")
+
+  add_test(NAME loader_windows_tls_callback_presence
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/loader/pe_tls_callback_check.py $<TARGET_FILE:vmp-loader-selftest>)
+  set_tests_properties(loader_windows_tls_callback_presence PROPERTIES PASS_REGULAR_EXPRESSION "PE TLS callback section OK")
+endif()
+

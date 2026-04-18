@@ -1,5 +1,7 @@
-vmp_add_placeholder_library(vmp_loader_linux
-  HEADER ${CMAKE_CURRENT_SOURCE_DIR}/include/vmp/loader/linux/linux_loader.h
-  SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/linux_loader.cpp
-  INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(vmp_loader_linux PUBLIC vmp_runtime_state vmp_runtime_audit)
+add_library(vmp_loader_linux SHARED
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/linux_loader.cpp)
+target_link_libraries(vmp_loader_linux PUBLIC vmp_build_options vmp_runtime_state vmp_runtime_audit vmp_runtime_strings)
+target_include_directories(vmp_loader_linux PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set_target_properties(vmp_loader_linux PROPERTIES
+  OUTPUT_NAME vmp_loader_linux
+  POSITION_INDEPENDENT_CODE ON)

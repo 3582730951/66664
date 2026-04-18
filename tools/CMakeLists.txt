@@ -44,3 +44,15 @@ set_target_properties(vmp-vm2-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BI
 add_executable(vmp-vm2-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm2_run.cpp)
 target_link_libraries(vmp-vm2-run PRIVATE vmp_runtime_vm2 vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
 set_target_properties(vmp-vm2-run PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+
+
+if(WIN32)
+  add_executable(vmp-loader-selftest ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_loader_selftest.cpp)
+  target_link_libraries(vmp-loader-selftest PRIVATE vmp_loader_windows)
+  set_target_properties(vmp-loader-selftest PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+elseif(UNIX AND NOT APPLE)
+  add_executable(vmp-loader-selftest ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_loader_selftest.cpp)
+  target_link_libraries(vmp-loader-selftest PRIVATE vmp_loader_linux)
+  target_link_options(vmp-loader-selftest PRIVATE -Wl,--no-as-needed)
+  set_target_properties(vmp-loader-selftest PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+endif()

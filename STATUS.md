@@ -527,3 +527,58 @@
   - `cd /workspace/vmp && ./build/tools/vmp-vm2-asm tests/runtime_vm2/fixtures/fib20.vm2s /tmp/fib20.vm2 && ./build/tools/vmp-vm2-run /tmp/fib20.vm2 20`：输出 `ret_int=6765`。
   - `cd /workspace/vmp && rg -n "NOT_IMPLEMENTED" runtime/vm2 tools/src/vmp_vm2_asm.cpp tools/src/vmp_vm2_run.cpp tests/runtime_vm2`：无输出。
   - clean-copy `/tmp` 回放：复制到 `/tmp/vmp-sub08-replay`（排除 `.git` / `build*` / `target` / `Cargo.lock` / `passwd.txt` / `OUT_DIR`），随后 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`：通过。
+
+### subtask_09
+- 本轮清单：
+  - 实现 `loader/linux/`：`vmp_linux_init()` 通过 `constructor(101)` + `.init_array` fallback 提前启动，完成审计 sink、`RuntimeState`、占位 hook、`VMP_STRING_MASTER_KEY` 恢复，并在异常时记录 `loader_init_failure`。
+  - 实现 `loader/windows/`：补齐 `.CRT$XLB` TLS callback、`vmp_windows_loader_dll_main(...)`、线程 attach/detach 最小状态维护与进程级一次性初始化路径；保持 `_WIN32` 友好的头文件导出。
+  - 实现 `runtime/state/` 最小状态机：`RuntimeState` 单例、`init_once` / `observe` / `set_flag` / `check_flag` / `get_audit` / `shutdown`，并去除该目录内 `NOT_IMPLEMENTED`。
+  - 调整 audit 默认路径：`AuditWriter::default_path()` 新增识别 `VMP_AUDIT_PATH`（保留旧 `VMP_AUDIT_LOG_PATH` 兼容）。
+  - 将占位 hook 初始化收口到 loader 路径；`runtime/audit` 不再自行通过 constructor 提前调用 placeholder。
+  - 新增 `tools/vmp-loader-selftest` 与 `tests/loader/` 真测：Linux ctor 优先级、自检日志、`VMP_AUDIT_PATH` 覆盖、`VMP_DISABLE_LOADER` 抑制、`LD_PRELOAD` 共享库路径；Windows 保留平台门控的 PE `.CRT` 检查脚本。
+  - 更新 `loader/README.md`、平台 README、`tools/README.md`，并为 `vmp-protect` 增加 `--platform` 参数接线/文档入口，供后续 loader 挂接使用（本轮不做重写）。
+- 变更文件：
+  - `CMakeLists.txt`
+  - `STATUS.md`
+  - `loader/README.md`
+  - `loader/linux/CMakeLists.txt`
+  - `loader/linux/README.md`
+  - `loader/linux/include/vmp/loader/linux/linux_loader.h`
+  - `loader/linux/src/linux_loader.cpp`
+  - `loader/windows/CMakeLists.txt`
+  - `loader/windows/README.md`
+  - `loader/windows/include/vmp/loader/windows/windows_loader.h`
+  - `loader/windows/src/windows_loader.cpp`
+  - `runtime/audit/src/audit.cpp`
+  - `runtime/audit/src/placeholder.cpp`
+  - `runtime/state/CMakeLists.txt`
+  - `runtime/state/README.md`
+  - `runtime/state/include/vmp/runtime/state/state.h`
+  - `runtime/state/rust_state/src/lib.rs`
+  - `runtime/state/src/state.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/loader/assert_audit_log.py`
+  - `tests/loader/assert_log_absent.py`
+  - `tests/loader/loader_linux_init_order.cpp`
+  - `tests/loader/loader_preload_probe.cpp`
+  - `tests/loader/pe_tls_callback_check.py`
+  - `tools/CMakeLists.txt`
+  - `tools/README.md`
+  - `tools/src/vmp_loader_selftest.cpp`
+  - `tools/src/vmp_protect.cpp`
+- 未完成项：
+  - Windows TLS callback 的运行时验证仅在 Windows CI 上执行；当前 Linux 容器内仅完成编译覆盖与平台门控脚本落地。
+  - Android/iOS loader 仍待子任务 12。
+  - 完整性状态联动、JIT/画像更细粒度状态机扩展待子任务 16。
+- 下一子任务建议：
+  - 进入子任务 12，补 Android `JNI_OnLoad + constructor` 与 iOS `constructor + capability gate`，并与本轮 `RuntimeState`/audit/key-context 初始化协议保持一致。
+- 验证：
+  - TDD red：先添加 `tests/loader/loader_linux_init_order.cpp` 并尝试构建，初次失败于缺失 `RuntimeState` / `RuntimeFlag` API；随后补实现并转绿。
+  - `cmake --build build -j`：通过。
+  - `ctest --test-dir build --output-on-failure`：`64/64` 通过（Windows-only 测试按平台门控跳过）。
+  - `cargo test --workspace`：通过。
+  - 手动验证：
+    - `VMP_AUDIT_PATH=/tmp/manual_loader.log ./build/tools/vmp-loader-selftest` 后日志存在且包含 `loader_init`。
+    - `VMP_DISABLE_LOADER=1 VMP_AUDIT_PATH=/tmp/manual_loader_disabled.log ./build/tools/vmp-loader-selftest` 后无日志内容。
+    - `./build/tools/vmp-protect --platform linux --policy tests/policy/examples/good.json --validate-only`：退出码 `0`。
+  - clean-copy 验证：复制到 `/tmp/vmp_clean_copy`（排除 `.git` / `build*` / `target` 等生成物）后重跑 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`，结果通过（`CLEAN_COPY_OK`）。

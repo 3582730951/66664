@@ -27,6 +27,7 @@ struct Options {
   bool validate_only = false;
   bool detector_selftest = false;
   bool protect_strings = false;
+  std::string platform = VMP_PLATFORM_STR;
   std::string string_bin = "string_pool.bin";
   std::string string_idx = "string_pool.idx.json";
   std::string string_kdf = "key_derivation.json";
@@ -47,7 +48,8 @@ int usage(const char* argv0, const std::string& message = {}) {
   }
   std::cerr << "usage: " << argv0
             << " [--dump-schema] [--policy <path>] [--rust-target-dir <dir>] [--emit-policy-json <path>] [--validate-only]"
-            << " [--detector-selftest] [--protect-strings --string-bin <bin> --string-idx <idx> --string-kdf <kdf>]"
+            << " [--detector-selftest] [--platform <linux|windows|android|ios|macos>]"
+            << " [--protect-strings --string-bin <bin> --string-idx <idx> --string-kdf <kdf>]"
             << std::endl;
   return 1;
 }
@@ -70,6 +72,8 @@ Options parse_args(int argc, char** argv) {
       options.detector_selftest = true;
     } else if (arg == "--protect-strings") {
       options.protect_strings = true;
+    } else if (arg == "--platform") {
+      options.platform = argv[++i];
     } else if (arg == "--string-bin") {
       options.string_bin = argv[++i];
     } else if (arg == "--string-idx") {
@@ -158,6 +162,13 @@ RustTsvRecord parse_rust_tsv_line(const std::string& file, std::size_t line_no, 
     }
   }
   return rec;
+}
+
+
+
+bool valid_platform(const std::string& platform) {
+  static const std::set<std::string> kValid = {"linux", "windows", "android", "ios", "macos"};
+  return kValid.find(platform) != kValid.end();
 }
 
 std::vector<RustTsvRecord> collect_rust_records(const std::string& root) {

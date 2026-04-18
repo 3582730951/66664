@@ -266,8 +266,11 @@ void AuditWriter::flush() noexcept {
 }
 
 std::filesystem::path AuditWriter::default_path() {
-  if (const char* override_path = std::getenv("VMP_AUDIT_LOG_PATH"); override_path != nullptr && *override_path != '\0') {
+  if (const char* override_path = std::getenv("VMP_AUDIT_PATH"); override_path != nullptr && *override_path != '\0') {
     return std::filesystem::path(override_path);
+  }
+  if (const char* legacy_override = std::getenv("VMP_AUDIT_LOG_PATH"); legacy_override != nullptr && *legacy_override != '\0') {
+    return std::filesystem::path(legacy_override);
   }
 #if defined(_WIN32)
   if (const char* local_app_data = std::getenv("LOCALAPPDATA"); local_app_data != nullptr && *local_app_data != '\0') {
