@@ -1,6 +1,12 @@
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <map>
+#include <optional>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -15,6 +21,7 @@ namespace {
 
 struct Options {
   std::string policy_path;
+  std::string rust_target_dir;
   std::string emit_policy_json_path;
   bool dump_schema = false;
   bool validate_only = false;
@@ -25,12 +32,21 @@ struct Options {
   std::string string_kdf = "key_derivation.json";
 };
 
+struct RustTsvRecord {
+  std::string crate_name;
+  std::string kind;
+  std::string path;
+  std::string span_file;
+  std::uint32_t span_line = 0;
+  std::vector<std::string> extra_tags;
+};
+
 int usage(const char* argv0, const std::string& message = {}) {
   if (!message.empty()) {
     std::cerr << "error: " << message << '\n';
   }
   std::cerr << "usage: " << argv0
-            << " [--dump-schema] [--policy <path>] [--emit-policy-json <path>] [--validate-only]"
+            << " [--dump-schema] [--policy <path>] [--rust-target-dir <dir>] [--emit-policy-json <path>] [--validate-only]"
             << " [--detector-selftest] [--protect-strings --string-bin <bin> --string-idx <idx> --string-kdf <kdf>]"
             << std::endl;
   return 1;
@@ -42,6 +58,8 @@ Options parse_args(int argc, char** argv) {
     const std::string arg = argv[i];
     if (arg == "--policy") {
       options.policy_path = argv[++i];
+    } else if (arg == "--rust-target-dir") {
+      options.rust_target_dir = argv[++i];
     } else if (arg == "--emit-policy-json") {
       options.emit_policy_json_path = argv[++i];
     } else if (arg == "--dump-schema") {
@@ -63,6 +81,178 @@ Options parse_args(int argc, char** argv) {
     }
   }
   return options;
+}
+
+std::string unescape_tsv_field(const std::string& input) {
+  std::string out;
+  out.reserve(input.size());
+  for (std::size_t i = 0; i < input.size(); ++i) {
+    const char ch = input[i];
+    if (ch != '\\') {
+      out.push_back(ch);
+      continue;
+    }
+    if (i + 1 >= input.size()) {
+      throw std::runtime_error("trailing backslash in TSV field");
+    }
+    const char next = input[++i];
+    switch (next) {
+      case 't': out.push_back('\t'); break;
+      case 'n': out.push_back('\n'); break;
+      case 'r': out.push_back('\r'); break;
+      case '\\': out.push_back('\\'); break;
+      default: throw std::runtime_error(std::string("unsupported TSV escape: \\") + next);
+    }
+  }
+  return out;
+}
+
+bool has_annotation_dir(const std::filesystem::path& path) {
+  for (const auto& part : path) {
+    const auto name = part.string();
+    if (name == "vmp_annotations" || name == "vmp-annotations") {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<std::filesystem::path> rust_tsv_files(const std::string& root) {
+  std::vector<std::filesystem::path> out;
+  const std::filesystem::path base(root);
+  if (!std::filesystem::exists(base)) {
+    throw std::runtime_error("--rust-target-dir does not exist: " + root);
+  }
+  for (auto it = std::filesystem::recursive_directory_iterator(base); it != std::filesystem::recursive_directory_iterator(); ++it) {
+    if (!it->is_regular_file()) {
+      continue;
+    }
+    if (it->path().extension() == ".tsv" && has_annotation_dir(it->path())) {
+      out.push_back(it->path());
+    }
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+RustTsvRecord parse_rust_tsv_line(const std::string& file, std::size_t line_no, const std::string& line) {
+  std::vector<std::string> parts;
+  std::stringstream ss(line);
+  std::string part;
+  while (std::getline(ss, part, '\t')) {
+    parts.push_back(part);
+  }
+  if (parts.size() != 6) {
+    throw std::runtime_error(file + ":" + std::to_string(line_no) + ": malformed TSV line: expected 6 columns");
+  }
+  RustTsvRecord rec;
+  rec.crate_name = unescape_tsv_field(parts[0]);
+  rec.kind = unescape_tsv_field(parts[1]);
+  rec.path = unescape_tsv_field(parts[2]);
+  rec.span_file = unescape_tsv_field(parts[3]);
+  rec.span_line = static_cast<std::uint32_t>(std::stoul(parts[4]));
+  std::stringstream tags(unescape_tsv_field(parts[5]));
+  while (std::getline(tags, part, ',')) {
+    if (!part.empty()) {
+      rec.extra_tags.push_back(part);
+    }
+  }
+  return rec;
+}
+
+std::vector<RustTsvRecord> collect_rust_records(const std::string& root) {
+  std::set<std::tuple<std::string, std::string, std::string, std::uint32_t>> seen;
+  std::vector<RustTsvRecord> out;
+  for (const auto& file : rust_tsv_files(root)) {
+    std::ifstream input(file);
+    std::string line;
+    std::size_t line_no = 0;
+    while (std::getline(input, line)) {
+      ++line_no;
+      if (line.find_first_not_of(" \t\r\n") == std::string::npos) {
+        continue;
+      }
+      auto rec = parse_rust_tsv_line(file.string(), line_no, line);
+      const auto key = std::make_tuple(rec.crate_name, rec.kind, rec.path, rec.span_line);
+      if (seen.insert(key).second) {
+        out.push_back(std::move(rec));
+      }
+    }
+  }
+  return out;
+}
+
+std::optional<std::string> rust_kind_of(const vmp::policy::PolicyEntry& entry) {
+  for (const auto& tag : entry.annotation_tags) {
+    if (tag.rfind("rust_kind:", 0) == 0) {
+      return tag.substr(std::string("rust_kind:").size());
+    }
+  }
+  if (entry.symbol_or_region.rfind("literal::", 0) == 0) {
+    return std::string("literal");
+  }
+  return std::nullopt;
+}
+
+vmp::policy::PolicyEntry rust_record_to_entry(const RustTsvRecord& rec) {
+  vmp::policy::PolicyEntry entry;
+  entry.symbol_or_region = rec.path;
+  entry.language_origin = vmp::policy::LanguageOrigin::rust;
+  entry.annotation_origin = vmp::policy::AnnotationOrigin::proc_macro;
+  entry.source_location.file = rec.span_file;
+  entry.source_location.line = rec.span_line;
+  entry.annotation_tags.push_back("rust_kind:" + rec.kind);
+  for (const auto& tag : rec.extra_tags) {
+    if (std::find(entry.annotation_tags.begin(), entry.annotation_tags.end(), tag) == entry.annotation_tags.end()) {
+      entry.annotation_tags.push_back(tag);
+    }
+  }
+  if (std::find(rec.extra_tags.begin(), rec.extra_tags.end(), "vm_func") != rec.extra_tags.end()) {
+    vmp::policy::apply_vm_func_annotation(entry);
+  }
+  if (std::find(rec.extra_tags.begin(), rec.extra_tags.end(), "vm_string") != rec.extra_tags.end()) {
+    vmp::policy::apply_vm_string_annotation(entry);
+  }
+  return entry;
+}
+
+std::string merge_key_for(const vmp::policy::PolicyEntry& entry) {
+  const auto kind = rust_kind_of(entry).value_or("unknown");
+  return vmp::policy::to_string(entry.language_origin) + "|" + entry.symbol_or_region + "|" + kind;
+}
+
+std::string describe_entry(const vmp::policy::PolicyEntry& entry) {
+  std::ostringstream oss;
+  oss << "symbol=" << entry.symbol_or_region << ", kind=" << rust_kind_of(entry).value_or("unknown")
+      << ", protection_domain=" << vmp::policy::to_string(entry.protection_domain)
+      << ", plaintext_budget=" << vmp::policy::to_string(entry.plaintext_budget)
+      << ", sensitivity_level=" << vmp::policy::to_string(entry.sensitivity_level)
+      << ", file=" << entry.source_location.file << ':' << entry.source_location.line;
+  return oss.str();
+}
+
+void merge_rust_entries(vmp::policy::PolicyIR& policy_ir, const std::vector<vmp::policy::PolicyEntry>& rust_entries) {
+  std::map<std::string, std::size_t> existing;
+  for (std::size_t i = 0; i < policy_ir.entries.size(); ++i) {
+    existing.emplace(merge_key_for(policy_ir.entries[i]), i);
+  }
+  for (const auto& entry : rust_entries) {
+    const auto key = merge_key_for(entry);
+    const auto it = existing.find(key);
+    if (it == existing.end()) {
+      existing.emplace(key, policy_ir.entries.size());
+      policy_ir.entries.push_back(entry);
+      continue;
+    }
+    const auto& current = policy_ir.entries[it->second];
+    if (!(current == entry)) {
+      std::ostringstream diff;
+      diff << "rust merge conflict for key " << key << '\n'
+           << "  existing: " << describe_entry(current) << '\n'
+           << "  incoming: " << describe_entry(entry);
+      throw std::runtime_error(diff.str());
+    }
+  }
 }
 
 int run_detector_selftest() {
@@ -122,7 +312,16 @@ int main(int argc, char** argv) {
         }
       }
     }
-    const auto policy_ir = vmp::policy::load_from_string(raw_policy.dump());
+    auto policy_ir = vmp::policy::load_from_string(raw_policy.dump());
+
+    if (!options.rust_target_dir.empty()) {
+      std::vector<vmp::policy::PolicyEntry> rust_entries;
+      for (const auto& record : collect_rust_records(options.rust_target_dir)) {
+        rust_entries.push_back(rust_record_to_entry(record));
+      }
+      merge_rust_entries(policy_ir, rust_entries);
+    }
+
     const auto validation = vmp::policy::validate(policy_ir);
 
     bool has_error = false;

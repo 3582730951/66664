@@ -2,6 +2,8 @@
 members = [
   "bindings/rust/vmp-macros",
   "bindings/rust/vmp-policy",
+  "bindings/rust/vmp-rust-collect",
+  "tests/bindings_rust/sample",
   "runtime/audit/rust_audit",
   "runtime/state/rust_state",
   "runtime/strings/rust_strings",

@@ -439,3 +439,42 @@
   - `git ls-files | grep -E "Cargo.lock|(^|/)build/"`：空。
 - 未完成项：无（本轮范围内）。
 - 下一子任务建议：等待 supervisor 指定下一轮 CI / 功能任务。
+
+### subtask_07
+- 本轮清单：
+  - 实现 Rust proc-macro 前端：`#[vm_func]` / `#[vm_string]` 与 literal-site `vm_string!` wrapper 所需的 hidden helper `vm_string_literal!`。
+  - 新增 Rust TSV collector：`vmp-rust-collect --target-dir <dir> --policy-out <path>`，支持空文件、去重、坏行报错。
+  - 新增 Rust sample / parity / merge 集成测试，并把 Rust TSV 合并接入 `vmp-protect --rust-target-dir`。
+  - 更新 Rust 绑定文档。
+- 变更文件：
+  - `Cargo.toml`
+  - `bindings/rust/README.md`
+  - `bindings/rust/vmp-macros/Cargo.toml`
+  - `bindings/rust/vmp-macros/src/lib.rs`
+  - `bindings/rust/vmp-policy/src/lib.rs`
+  - `bindings/rust/vmp-rust-collect/Cargo.toml`
+  - `bindings/rust/vmp-rust-collect/src/lib.rs`
+  - `bindings/rust/vmp-rust-collect/src/main.rs`
+  - `bindings/rust/vmp-rust-collect/tests/collect.rs`
+  - `tests/CMakeLists.txt`
+  - `tests/bindings_rust/base_policy.json`
+  - `tests/bindings_rust/compare_parity.py`
+  - `tests/bindings_rust/compare_policy_json.py`
+  - `tests/bindings_rust/expected.json`
+  - `tests/bindings_rust/parity_c/sample.c`
+  - `tests/bindings_rust/sample/Cargo.toml`
+  - `tests/bindings_rust/sample/build.rs`
+  - `tests/bindings_rust/sample/src/lib.rs`
+  - `tools/src/vmp_protect.cpp`
+- 未完成项：
+  - 本轮范围内无未完成项。
+- 下一子任务建议：
+  - 若继续 Rust 侧工作，可进入 planner/analyzer 真正消费 `vm_string_func_scope`、泛型实例与 panic/formatting message 提升链路。
+- 验证：
+  - `cd /workspace/vmp && cmake --build build -j`：通过。
+  - `cd /workspace/vmp && ctest --test-dir build --output-on-failure`：`44/44` 通过。
+  - `cd /workspace/vmp && cargo test --workspace`：通过。
+  - `cd /workspace/vmp && cargo build -p demo_sample`：通过。
+  - `cd /workspace/vmp && cargo run -p vmp-rust-collect -- --target-dir target --policy-out /tmp/demo_sample_policy.json && python3 tests/bindings_rust/compare_policy_json.py /tmp/demo_sample_policy.json tests/bindings_rust/expected.json`：通过，输出 `policy json equal`。
+  - `cd /workspace/vmp && build/tools/vmp-protect --policy tests/bindings_rust/base_policy.json --rust-target-dir target --emit-policy-json /tmp/demo_sample_merged.json --validate-only && python3 tests/bindings_rust/compare_policy_json.py /tmp/demo_sample_merged.json tests/bindings_rust/expected.json`：通过，输出 `policy json equal`。
+  - clean-copy `/tmp` 回放：复制到 `/tmp/vmp-sub07-replay`（排除 `.git` / `build*` / `target` / `Cargo.lock`），随后 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace && cargo build -p demo_sample && cargo run -p vmp-rust-collect -- --target-dir target --policy-out /tmp/vmp_sub07_policy.json && build/tools/vmp-protect --policy tests/bindings_rust/base_policy.json --rust-target-dir target --emit-policy-json /tmp/vmp_sub07_merged.json --validate-only`：通过，输出 `TMP_REPLAY_OK`。

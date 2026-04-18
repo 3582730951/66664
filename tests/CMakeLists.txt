@@ -129,6 +129,45 @@ add_test(NAME bindings_cpp_vmp_clang_passthrough_exists
   COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_ASSERT_EXISTS} ${CMAKE_BINARY_DIR}/tests/passthrough_c.o)
 set_tests_properties(bindings_cpp_vmp_clang_passthrough_exists PROPERTIES DEPENDS bindings_cpp_vmp_clang_passthrough PASS_REGULAR_EXPRESSION "exists:")
 
+# bindings/rust tests
+set(VMP_RUST_SAMPLE_MANIFEST ${CMAKE_CURRENT_SOURCE_DIR}/bindings_rust/sample/Cargo.toml)
+set(VMP_RUST_EXPECTED ${CMAKE_CURRENT_SOURCE_DIR}/bindings_rust/expected.json)
+set(VMP_RUST_COMPARE ${CMAKE_CURRENT_SOURCE_DIR}/bindings_rust/compare_policy_json.py)
+set(VMP_RUST_PARITY_COMPARE ${CMAKE_CURRENT_SOURCE_DIR}/bindings_rust/compare_parity.py)
+set(VMP_RUST_BASE_POLICY ${CMAKE_CURRENT_SOURCE_DIR}/bindings_rust/base_policy.json)
+set(VMP_RUST_POLICY_OUT ${CMAKE_BINARY_DIR}/tests/demo_sample_rust.policy.json)
+set(VMP_RUST_MERGED_OUT ${CMAKE_BINARY_DIR}/tests/demo_sample_rust_merged.policy.json)
+set(VMP_RUST_PARITY_C ${CMAKE_CURRENT_SOURCE_DIR}/bindings_rust/parity_c/sample.c)
+
+add_test(NAME bindings_rust_demo_build
+  COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_SOURCE_DIR} cargo build -p demo_sample)
+add_test(NAME bindings_rust_collect
+  COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_SOURCE_DIR} cargo run -p vmp-rust-collect -- --target-dir ${CMAKE_SOURCE_DIR}/target --policy-out ${VMP_RUST_POLICY_OUT})
+set_tests_properties(bindings_rust_collect PROPERTIES DEPENDS bindings_rust_demo_build PASS_REGULAR_EXPRESSION "vmp-rust-collect OK entries=5")
+add_test(NAME bindings_rust_collect_compare
+  COMMAND ${Python3_EXECUTABLE} ${VMP_RUST_COMPARE} ${VMP_RUST_POLICY_OUT} ${VMP_RUST_EXPECTED})
+set_tests_properties(bindings_rust_collect_compare PROPERTIES DEPENDS bindings_rust_collect PASS_REGULAR_EXPRESSION "policy json equal")
+
+add_test(NAME bindings_rust_parity_c_collect
+  COMMAND $<TARGET_FILE:vmp-clang> -c ${VMP_RUST_PARITY_C} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/bindings_rust_parity_c.json -o ${CMAKE_BINARY_DIR}/tests/bindings_rust_parity_c.o)
+add_test(NAME bindings_rust_parity_compare
+  COMMAND ${Python3_EXECUTABLE} ${VMP_RUST_PARITY_COMPARE} ${CMAKE_BINARY_DIR}/tests/bindings_rust_parity_c.json ${VMP_RUST_POLICY_OUT})
+set_tests_properties(bindings_rust_parity_compare PROPERTIES DEPENDS "bindings_rust_parity_c_collect;bindings_rust_collect" PASS_REGULAR_EXPRESSION "rust/c parity OK")
+
+add_test(NAME vmp_protect_rust_merge
+  COMMAND $<TARGET_FILE:vmp-protect> --policy ${VMP_RUST_BASE_POLICY} --rust-target-dir ${CMAKE_SOURCE_DIR}/target --emit-policy-json ${VMP_RUST_MERGED_OUT} --validate-only)
+set_tests_properties(vmp_protect_rust_merge PROPERTIES DEPENDS bindings_rust_demo_build PASS_REGULAR_EXPRESSION "OK: policy loaded, 5 entries, schema=v1")
+add_test(NAME vmp_protect_rust_merge_compare
+  COMMAND ${Python3_EXECUTABLE} ${VMP_RUST_COMPARE} ${VMP_RUST_MERGED_OUT} ${VMP_RUST_EXPECTED})
+set_tests_properties(vmp_protect_rust_merge_compare PROPERTIES DEPENDS vmp_protect_rust_merge PASS_REGULAR_EXPRESSION "policy json equal")
+
+vmp_unset_ci_polluters(bindings_rust_demo_build)
+vmp_unset_ci_polluters(bindings_rust_collect)
+vmp_unset_ci_polluters(bindings_rust_collect_compare)
+vmp_unset_ci_polluters(bindings_rust_parity_c_collect)
+vmp_unset_ci_polluters(bindings_rust_parity_compare)
+vmp_unset_ci_polluters(vmp_protect_rust_merge)
+vmp_unset_ci_polluters(vmp_protect_rust_merge_compare)
 
 
 # runtime/strings tests

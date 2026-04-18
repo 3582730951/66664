@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {
+      "symbol_or_region": "demo_sample::add",
+      "language_origin": "rust",
+      "annotation_origin": "proc_macro",
+      "protection_domain": "vm1",
+      "plaintext_budget": "transient_only",
+      "sensitivity_level": "sensitive",
+      "annotation_tags": ["vm_func"],
+      "source_location": {"file": "__ROOT__/tests/bindings_rust/sample/src/lib.rs", "line": 14, "column": 0}
+    },
+    {
+      "symbol_or_region": "demo_sample::fetch",
+      "language_origin": "rust",
+      "annotation_origin": "proc_macro",
+      "protection_domain": "vm1",
+      "plaintext_budget": "transient_only",
+      "sensitivity_level": "sensitive",
+      "annotation_tags": ["vm_func"],
+      "source_location": {"file": "__ROOT__/tests/bindings_rust/sample/src/lib.rs", "line": 19, "column": 0}
+    },
+    {
+      "symbol_or_region": "demo_sample::SampleTrait for Type::m",
+      "language_origin": "rust",
+      "annotation_origin": "proc_macro",
+      "protection_domain": "vm1",
+      "plaintext_budget": "transient_only",
+      "sensitivity_level": "sensitive",
+      "annotation_tags": ["vm_func"],
+      "source_location": {"file": "__ROOT__/tests/bindings_rust/sample/src/lib.rs", "line": 27, "column": 0}
+    },
+    {
+      "symbol_or_region": "demo_sample::GREETING",
+      "language_origin": "rust",
+      "annotation_origin": "proc_macro",
+      "protection_domain": "native",
+      "plaintext_budget": "transient_only",
+      "sensitivity_level": "highly_sensitive",
+      "annotation_tags": ["vm_string"],
+      "source_location": {"file": "__ROOT__/tests/bindings_rust/sample/src/lib.rs", "line": 33, "column": 0}
+    },
+    {
+      "symbol_or_region": "literal::lib.rs:38|\"secret key\"",
+      "language_origin": "rust",
+      "annotation_origin": "proc_macro",
+      "protection_domain": "native",
+      "plaintext_budget": "transient_only",
+      "sensitivity_level": "highly_sensitive",
+      "annotation_tags": ["vm_string"],
+      "source_location": {"file": "__ROOT__/tests/bindings_rust/sample/src/lib.rs", "line": 38, "column": 0}
+    }
+  ]
+}

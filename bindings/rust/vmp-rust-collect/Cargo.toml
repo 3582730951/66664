@@ -1,0 +1,18 @@
+[package]
+name = "vmp-rust-collect"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "vmp-rust-collect"
+path = "src/main.rs"
+
+[dependencies]
+vmp-policy = { path = "../vmp-policy" }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

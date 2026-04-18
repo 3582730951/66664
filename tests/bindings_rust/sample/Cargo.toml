@@ -1,0 +1,12 @@
+[package]
+name = "demo_sample"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[dependencies]
+vmp-macros = { path = "../../../bindings/rust/vmp-macros" }
+
+[lib]
+path = "src/lib.rs"

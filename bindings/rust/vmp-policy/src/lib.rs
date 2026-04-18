@@ -375,6 +375,31 @@ impl PolicyIR {
     }
 }
 
+
+fn add_unique_tag(tags: &mut Vec<String>, tag: &str) {
+    if !tags.iter().any(|existing| existing == tag) {
+        tags.push(tag.to_string());
+    }
+}
+
+pub fn apply_vm_func_annotation(entry: &mut PolicyEntry) {
+    add_unique_tag(&mut entry.annotation_tags, "vm_func");
+    if entry.protection_domain == ProtectionDomain::Native {
+        entry.protection_domain = ProtectionDomain::Vm1;
+    }
+    if matches!(entry.sensitivity_level, SensitivityLevel::Normal) {
+        entry.sensitivity_level = SensitivityLevel::Sensitive;
+    }
+}
+
+pub fn apply_vm_string_annotation(entry: &mut PolicyEntry) {
+    add_unique_tag(&mut entry.annotation_tags, "vm_string");
+    entry.sensitivity_level = SensitivityLevel::HighlySensitive;
+    if entry.plaintext_budget != PlaintextBudget::None {
+        entry.plaintext_budget = PlaintextBudget::TransientOnly;
+    }
+}
+
 impl ValidationError {
     fn error(entry: &PolicyEntry, code: &str, field: &str, message: &str) -> Self {
         Self {
