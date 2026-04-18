@@ -382,6 +382,27 @@ TransientView& TransientView::operator=(TransientView&& other) noexcept {
   return *this;
 }
 
+std::vector<std::uint8_t> TransientView::debug_zeroized_snapshot() {
+  std::vector<std::uint8_t> snapshot;
+  if (data_ == nullptr) {
+    return snapshot;
+  }
+  secure_memzero(data_, size_);
+  snapshot.assign(data_, data_ + static_cast<std::ptrdiff_t>(size_));
+#if !defined(_WIN32)
+  if (!uses_inline_ && mapped_region_ != nullptr) {
+    ::munlock(mapped_region_, mapped_size_);
+    ::munmap(mapped_region_, mapped_size_);
+  }
+#endif
+  data_ = nullptr;
+  size_ = 0;
+  mapped_region_ = nullptr;
+  mapped_size_ = 0;
+  uses_inline_ = true;
+  return snapshot;
+}
+
 void TransientView::allocate_large(std::size_t size) {
 #if defined(_WIN32)
   throw std::runtime_error("strings: large transient buffers unsupported on this platform");

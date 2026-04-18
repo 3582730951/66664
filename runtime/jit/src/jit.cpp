@@ -1,7 +1,822 @@
 #include <vmp/runtime/jit/jit.h>
 
-namespace vmp::runtime::jit {
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <list>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+#include <unordered_set>
 
-const char* Facade::status() const noexcept { return "NOT_IMPLEMENTED"; }
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
+#include <vmp/runtime/audit/audit.h>
+#include <vmp/runtime/vm1/isa.h>
+#include <vmp/runtime/vm1/vm1.h>
+
+namespace vmp::runtime::jit {
+namespace {
+
+using vmp::runtime::vm1::Opcode;
+using vmp::runtime::vm1::Vm1Module;
+
+constexpr std::size_t kX64StubSize = 2 + 8 + 2 + 8 + 2 + 1;
+
+#if !defined(_WIN32)
+using Vm1BlockExecFn = std::uint32_t (*)(vmp::runtime::vm1::Vm1Context*, std::uint32_t);
+using Vm1TraceExecFn = std::uint32_t (*)(vmp::runtime::vm1::Vm1Context*, const std::uint32_t*, std::size_t);
+extern "C" std::uint32_t vmp_vm1_jit_execute_block(vmp::runtime::vm1::Vm1Context*, std::uint32_t) __attribute__((weak));
+extern "C" std::uint32_t vmp_vm1_jit_execute_trace(vmp::runtime::vm1::Vm1Context*, const std::uint32_t*, std::size_t) __attribute__((weak));
+
+extern "C" std::uint32_t vmp_vm1_jit_block_trampoline(vmp::runtime::vm1::Vm1Context* context, std::uint32_t start_pc) {
+  auto* fn = reinterpret_cast<Vm1BlockExecFn>(vmp_vm1_jit_execute_block);
+  if (fn == nullptr) {
+    return 0;
+  }
+  return fn(context, start_pc);
+}
+
+extern "C" std::uint32_t vmp_vm1_jit_trace_trampoline(vmp::runtime::vm1::Vm1Context* context,
+                                                         const std::uint32_t* pcs,
+                                                         std::size_t count) {
+  auto* fn = reinterpret_cast<Vm1TraceExecFn>(vmp_vm1_jit_execute_trace);
+  if (fn == nullptr) {
+    return 0;
+  }
+  return fn(context, pcs, count);
+}
+#endif
+
+
+bool env_truthy(const char* value) {
+  if (value == nullptr) {
+    return false;
+  }
+  return std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 || std::strcmp(value, "TRUE") == 0 ||
+         std::strcmp(value, "yes") == 0;
+}
+
+std::string env_string(const char* name) {
+  if (const char* value = std::getenv(name); value != nullptr) {
+    return value;
+  }
+  return {};
+}
+
+std::size_t env_size(const char* name, std::size_t fallback) {
+  if (const char* value = std::getenv(name); value != nullptr) {
+    try {
+      return static_cast<std::size_t>(std::stoull(value));
+    } catch (...) {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+bool host_supports_x64_backend() {
+#if defined(__linux__) && defined(__x86_64__)
+  return true;
+#else
+  return false;
+#endif
+}
+
+Vm1JitBackend parse_backend_env() {
+  const auto raw = env_string("VMP_JIT_BACKEND");
+  if (raw == "off") {
+    return Vm1JitBackend::off;
+  }
+  if (raw == "c") {
+    return Vm1JitBackend::c;
+  }
+  if (raw == "x64") {
+    return host_supports_x64_backend() ? Vm1JitBackend::x64 : Vm1JitBackend::c;
+  }
+  if (host_supports_x64_backend()) {
+    return Vm1JitBackend::x64;
+  }
+  return Vm1JitBackend::c;
+}
+
+const char* backend_name(Vm1JitBackend backend) {
+  switch (backend) {
+    case Vm1JitBackend::off: return "off";
+    case Vm1JitBackend::c: return "c";
+    case Vm1JitBackend::x64: return "x64";
+  }
+  return "off";
+}
+
+std::uint32_t read_u32(const std::vector<std::uint8_t>& code, std::size_t& pc) {
+  if (pc + 4 > code.size()) {
+    throw std::runtime_error("jit decode: truncated u32");
+  }
+  std::uint32_t value = 0;
+  for (int i = 0; i < 4; ++i) {
+    value |= static_cast<std::uint32_t>(code[pc + static_cast<std::size_t>(i)]) << (8 * i);
+  }
+  pc += 4;
+  return value;
+}
+
+std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::size_t pc) {
+  if (pc >= code.size()) {
+    throw std::runtime_error("jit decode: pc out of range");
+  }
+  const auto opcode = static_cast<Opcode>(code[pc]);
+  switch (opcode) {
+    case Opcode::nop:
+    case Opcode::breakpoint:
+    case Opcode::ret:
+    case Opcode::domain_ret:
+      return 1;
+    case Opcode::trap:
+    case Opcode::jmp:
+      return 1 + 4;
+    case Opcode::ldi64:
+    case Opcode::ldi_u64:
+      return 1 + 1 + 8;
+    case Opcode::ldi_f64:
+      return 1 + 1 + 8;
+    case Opcode::mov:
+    case Opcode::neg:
+    case Opcode::bit_not:
+    case Opcode::release_transient_string:
+      return 1 + 2;
+    case Opcode::add:
+    case Opcode::sub:
+    case Opcode::mul:
+    case Opcode::div:
+    case Opcode::mod:
+    case Opcode::bit_and:
+    case Opcode::bit_or:
+    case Opcode::bit_xor:
+    case Opcode::shl:
+    case Opcode::shr:
+    case Opcode::sar:
+      return 1 + 3;
+    case Opcode::load_mem8:
+    case Opcode::load_mem16:
+    case Opcode::load_mem32:
+    case Opcode::load_mem64:
+    case Opcode::store_mem8:
+    case Opcode::store_mem16:
+    case Opcode::store_mem32:
+    case Opcode::store_mem64:
+      return 1 + 1 + 1 + 4;
+    case Opcode::jeq:
+    case Opcode::jne:
+    case Opcode::jlt:
+    case Opcode::jle:
+    case Opcode::jgt:
+    case Opcode::jge:
+      return 1 + 1 + 1 + 4;
+    case Opcode::call:
+      return 1 + 4 + 1;
+    case Opcode::domain_call:
+      return 1 + 1 + 4 + 1 + 1 + 1;
+    case Opcode::load_transient_string:
+      return 1 + 1 + 4;
+  }
+  throw std::runtime_error("jit decode: unknown opcode");
+}
+
+bool is_terminator(Opcode opcode) {
+  switch (opcode) {
+    case Opcode::jmp:
+    case Opcode::jeq:
+    case Opcode::jne:
+    case Opcode::jlt:
+    case Opcode::jle:
+    case Opcode::jgt:
+    case Opcode::jge:
+    case Opcode::call:
+    case Opcode::ret:
+    case Opcode::domain_call:
+    case Opcode::domain_ret:
+    case Opcode::trap:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool is_supported_x64_opcode(Opcode opcode) {
+  switch (opcode) {
+    case Opcode::nop:
+    case Opcode::breakpoint:
+    case Opcode::ldi64:
+    case Opcode::ldi_u64:
+    case Opcode::mov:
+    case Opcode::add:
+    case Opcode::sub:
+    case Opcode::mul:
+    case Opcode::div:
+    case Opcode::mod:
+    case Opcode::bit_and:
+    case Opcode::bit_or:
+    case Opcode::bit_xor:
+    case Opcode::shl:
+    case Opcode::shr:
+    case Opcode::sar:
+    case Opcode::neg:
+    case Opcode::bit_not:
+    case Opcode::load_mem8:
+    case Opcode::load_mem16:
+    case Opcode::load_mem32:
+    case Opcode::load_mem64:
+    case Opcode::store_mem8:
+    case Opcode::store_mem16:
+    case Opcode::store_mem32:
+    case Opcode::store_mem64:
+    case Opcode::jmp:
+    case Opcode::jeq:
+    case Opcode::jne:
+    case Opcode::jlt:
+    case Opcode::jle:
+    case Opcode::jgt:
+    case Opcode::jge:
+    case Opcode::call:
+    case Opcode::ret:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool block_is_x64_supported(const Vm1Module& module, std::uint32_t start_pc) {
+  std::size_t pc = start_pc;
+  while (pc < module.code.size()) {
+    const auto opcode = static_cast<Opcode>(module.code[pc]);
+    if (!is_supported_x64_opcode(opcode)) {
+      return false;
+    }
+    const auto size = decode_instruction_size(module.code, pc);
+    pc += size;
+    if (is_terminator(opcode)) {
+      return true;
+    }
+  }
+  return true;
+}
+
+bool trace_is_x64_supported(const Vm1Module& module, const std::vector<std::uint32_t>& pcs) {
+  return std::all_of(pcs.begin(), pcs.end(), [&](std::uint32_t pc) { return block_is_x64_supported(module, pc); });
+}
+
+std::string join_trace(const std::vector<std::uint32_t>& pcs) {
+  std::ostringstream oss;
+  for (std::size_t i = 0; i < pcs.size(); ++i) {
+    if (i != 0) {
+      oss << "->";
+    }
+    oss << pcs[i];
+  }
+  return oss.str();
+}
+
+void write_u64(std::uint8_t*& out, std::uint64_t value) {
+  std::memcpy(out, &value, sizeof(value));
+  out += sizeof(value);
+}
+
+std::string shell_escape(const std::string& value) {
+  std::string out = "'";
+  for (char ch : value) {
+    if (ch == '\'') {
+      out += "'\\''";
+    } else {
+      out.push_back(ch);
+    }
+  }
+  out.push_back('\'');
+  return out;
+}
+
+void ensure_directory(const std::filesystem::path& dir) {
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  if (ec) {
+    throw std::runtime_error("jit: failed to create cache directory '" + dir.string() + "': " + ec.message());
+  }
+}
+
+#if !defined(_WIN32)
+struct MmapRegion {
+  void* ptr = nullptr;
+  std::size_t size = 0;
+
+  ~MmapRegion() {
+    if (ptr != nullptr) {
+      ::munmap(ptr, size);
+    }
+  }
+};
+#endif
+
+}  // namespace
+
+struct Vm1Jit::Impl {
+  struct ModuleCache;
+
+  struct TraceCandidate {
+    std::vector<std::uint32_t> pcs;
+    std::uint64_t stable_hits = 0;
+  };
+
+  struct Entry {
+    std::uint32_t start_pc = 0;
+    std::vector<std::uint32_t> pcs;
+    Vm1JitBackend backend = Vm1JitBackend::off;
+    JitEntry fn = nullptr;
+    std::size_t code_size = 0;
+    bool is_trace = false;
+    std::uint64_t activation_hit = 0;
+    Vm1JitEntryStats stats{};
+    std::uint64_t lru_tick = 0;
+#if defined(_WIN32)
+    void* code_region = nullptr;
+#else
+    void* code_region = nullptr;
+    std::size_t code_region_size = 0;
+    void* dl_handle = nullptr;
+#endif
+    std::filesystem::path c_source_path;
+    std::filesystem::path c_so_path;
+    std::uint32_t* trace_heap = nullptr;
+
+    Entry() = default;
+    Entry(const Entry&) = delete;
+    Entry& operator=(const Entry&) = delete;
+    Entry(Entry&& other) noexcept { *this = std::move(other); }
+    Entry& operator=(Entry&& other) noexcept {
+      if (this != &other) {
+        start_pc = other.start_pc;
+        pcs = std::move(other.pcs);
+        backend = other.backend;
+        fn = other.fn;
+        code_size = other.code_size;
+        is_trace = other.is_trace;
+        activation_hit = other.activation_hit;
+        stats = other.stats;
+        lru_tick = other.lru_tick;
+        code_region = other.code_region;
+#if !defined(_WIN32)
+        code_region_size = other.code_region_size;
+        dl_handle = other.dl_handle;
+#endif
+        c_source_path = std::move(other.c_source_path);
+        c_so_path = std::move(other.c_so_path);
+        trace_heap = other.trace_heap;
+        other.fn = nullptr;
+        other.code_region = nullptr;
+#if !defined(_WIN32)
+        other.code_region_size = 0;
+        other.dl_handle = nullptr;
+#endif
+        other.trace_heap = nullptr;
+      }
+      return *this;
+    }
+
+    ~Entry() {
+#if defined(_WIN32)
+      if (code_region != nullptr) {
+        ::VirtualFree(code_region, 0, MEM_RELEASE);
+      }
+#else
+      if (code_region != nullptr) {
+        ::munmap(code_region, code_region_size);
+      }
+      if (dl_handle != nullptr) {
+        ::dlclose(dl_handle);
+      }
+#endif
+      delete[] trace_heap;
+      std::error_code ignore;
+      if (!c_source_path.empty()) {
+        std::filesystem::remove(c_source_path, ignore);
+      }
+      if (!c_so_path.empty()) {
+        std::filesystem::remove(c_so_path, ignore);
+      }
+    }
+  };
+
+  struct ModuleCache {
+    std::size_t budget = 8u * 1024u * 1024u;
+    std::size_t used = 0;
+    std::uint64_t lru_clock = 0;
+    std::unordered_map<std::uint32_t, Entry> entries;
+    std::unordered_map<std::uint32_t, TraceCandidate> trace_candidates;
+  };
+
+  mutable std::mutex mutex;
+  Vm1JitConfig config;
+  vmp::runtime::audit::AuditWriter* audit = nullptr;
+  std::unordered_map<std::uint64_t, ModuleCache> modules;
+  std::filesystem::path cache_dir;
+
+  void refresh_config_from_env() {
+    config.verbose = env_truthy(std::getenv("VMP_JIT_VERBOSE"));
+    config.module_cache_budget_bytes = env_size("VMP_JIT_CACHE_BUDGET", config.module_cache_budget_bytes);
+  }
+
+  void emit_audit(const std::string& event_type, const std::string& note, std::uint64_t pc = 0) {
+    if (audit == nullptr) {
+      return;
+    }
+    audit->append(vmp::runtime::audit::make_event(event_type, note, pc, "vm1_jit", "", 0));
+  }
+
+  ModuleCache& module_cache(std::uint64_t module_id) {
+    auto& cache = modules[module_id];
+    cache.budget = config.module_cache_budget_bytes;
+    return cache;
+  }
+
+  void evict_if_needed(ModuleCache& cache, std::uint64_t module_id, std::size_t incoming) {
+    if (incoming > cache.budget) {
+      emit_audit("jit_oom", "entry exceeds module cache budget", module_id);
+      throw std::runtime_error("jit: entry exceeds module cache budget");
+    }
+    while (cache.used + incoming > cache.budget && !cache.entries.empty()) {
+      auto victim_it = std::min_element(cache.entries.begin(), cache.entries.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.second.lru_tick < rhs.second.lru_tick;
+      });
+      if (victim_it == cache.entries.end()) {
+        break;
+      }
+      cache.used -= victim_it->second.code_size;
+      emit_audit("jit_oom", "evict module=" + std::to_string(module_id) + " pc=" + std::to_string(victim_it->first),
+                 victim_it->first);
+      cache.entries.erase(victim_it);
+    }
+  }
+
+  Entry* find_ready_entry(ModuleCache& cache, std::uint32_t start_pc, std::uint64_t hit_count) {
+    auto it = cache.entries.find(start_pc);
+    if (it == cache.entries.end() || it->second.fn == nullptr || hit_count < it->second.activation_hit) {
+      return nullptr;
+    }
+    it->second.lru_tick = ++cache.lru_clock;
+    it->second.stats.hit_count++;
+    return &it->second;
+  }
+
+  Entry compile_c_entry(const Vm1Module& module, std::uint32_t start_pc, const std::vector<std::uint32_t>& pcs, bool trace) {
+#if defined(_WIN32)
+    throw std::runtime_error("jit c backend unavailable on windows in this build");
+#else
+    ensure_directory(cache_dir);
+    const auto base = cache_dir / ("vm1jit_" + std::to_string(module.id()) + "_" + std::to_string(start_pc));
+    const auto c_path = base.string() + (trace ? "_trace.c" : "_block.c");
+    const auto so_path = base.string() + (trace ? "_trace.so" : "_block.so");
+
+    std::ofstream out(c_path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+      throw std::runtime_error("jit: failed to open generated C source");
+    }
+    out << "#include <stddef.h>\n#include <stdint.h>\n#include <dlfcn.h>\n";
+    out << "struct Vm1Context;\n";
+    if (trace) {
+      out << "typedef uint32_t (*trace_fn_t)(struct Vm1Context*, const uint32_t*, size_t);\n";
+      out << "static uint32_t pcs[] = {";
+      for (std::size_t i = 0; i < pcs.size(); ++i) {
+        if (i != 0) out << ',';
+        out << pcs[i];
+      }
+      out << "};\n";
+      out << "__attribute__((visibility(\"default\"))) uint32_t vmp_vm1_jit_entry(struct Vm1Context* ctx) {\n";
+      out << "  static trace_fn_t fn = 0;\n";
+      out << "  if (!fn) fn = (trace_fn_t)dlsym(RTLD_DEFAULT, \"vmp_vm1_jit_execute_trace\");\n";
+      out << "  if (!fn) return 0;\n";
+      out << "  return fn(ctx, pcs, sizeof(pcs)/sizeof(pcs[0]));\n}\n";
+    } else {
+      out << "typedef uint32_t (*block_fn_t)(struct Vm1Context*, uint32_t);\n";
+      out << "__attribute__((visibility(\"default\"))) uint32_t vmp_vm1_jit_entry(struct Vm1Context* ctx) {\n";
+      out << "  static block_fn_t fn = 0;\n";
+      out << "  if (!fn) fn = (block_fn_t)dlsym(RTLD_DEFAULT, \"vmp_vm1_jit_execute_block\");\n";
+      out << "  if (!fn) return 0;\n";
+      out << "  return fn(ctx, " << start_pc << "u);\n}\n";
+    }
+    out.close();
+
+    const std::string compile_cmd = std::string("cc -shared -O2 -fPIC -o ") + shell_escape(so_path) + " " +
+                                    shell_escape(c_path) + " -ldl >/dev/null 2>&1";
+    if (std::system(compile_cmd.c_str()) != 0) {
+      throw std::runtime_error("jit: cc backend compile failed");
+    }
+
+    void* handle = ::dlopen(so_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (handle == nullptr) {
+      throw std::runtime_error(std::string("jit: dlopen failed: ") + ::dlerror());
+    }
+    auto* symbol = reinterpret_cast<JitEntry>(::dlsym(handle, "vmp_vm1_jit_entry"));
+    if (symbol == nullptr) {
+      ::dlclose(handle);
+      throw std::runtime_error(std::string("jit: dlsym failed: ") + ::dlerror());
+    }
+
+    Entry entry;
+    entry.start_pc = start_pc;
+    entry.pcs = pcs;
+    entry.backend = Vm1JitBackend::c;
+    entry.fn = symbol;
+    entry.code_size = std::max<std::size_t>(64, pcs.size() * sizeof(std::uint32_t));
+    entry.is_trace = trace;
+    entry.code_region = nullptr;
+    entry.code_region_size = 0;
+    entry.dl_handle = handle;
+    entry.c_source_path = c_path;
+    entry.c_so_path = so_path;
+    return entry;
+#endif
+  }
+
+  Entry compile_x64_entry(const Vm1Module& module, std::uint32_t start_pc, const std::vector<std::uint32_t>& pcs, bool trace) {
+#if defined(__linux__) && defined(__x86_64__)
+    if ((trace && !trace_is_x64_supported(module, pcs)) || (!trace && !block_is_x64_supported(module, start_pc))) {
+      throw std::runtime_error("jit: x64 backend unsupported opcode in block/trace");
+    }
+    const std::size_t alloc_size = 64;
+    void* region = ::mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (region == MAP_FAILED) {
+      throw std::runtime_error("jit: mmap failed");
+    }
+
+    auto* out = static_cast<std::uint8_t*>(region);
+    std::uint32_t* pcs_copy = nullptr;
+    out[0] = 0x48; out[1] = 0x83; out[2] = 0xEC; out[3] = 0x08; out += 4;  // sub rsp, 8
+    if (trace) {
+      pcs_copy = new std::uint32_t[pcs.size()];
+      std::copy(pcs.begin(), pcs.end(), pcs_copy);
+      out[0] = 0x48; out[1] = 0xBE; out += 2;  // mov rsi, imm64
+      write_u64(out, reinterpret_cast<std::uint64_t>(pcs_copy));
+      out[0] = 0x48; out[1] = 0xBA; out += 2;  // mov rdx, imm64(count)
+      write_u64(out, static_cast<std::uint64_t>(pcs.size()));
+      out[0] = 0x48; out[1] = 0xB8; out += 2;  // mov rax, imm64(fn)
+      write_u64(out, reinterpret_cast<std::uint64_t>(&vmp_vm1_jit_trace_trampoline));
+      out[0] = 0xFF; out[1] = 0xD0; out += 2;  // call rax
+      out[0] = 0x48; out[1] = 0x83; out[2] = 0xC4; out[3] = 0x08; out += 4;  // add rsp, 8
+      out[0] = 0xC3;
+    } else {
+      out[0] = 0x48; out[1] = 0xBE; out += 2;  // mov rsi, imm64
+      write_u64(out, static_cast<std::uint64_t>(start_pc));
+      out[0] = 0x48; out[1] = 0xB8; out += 2;  // mov rax, imm64
+      write_u64(out, reinterpret_cast<std::uint64_t>(&vmp_vm1_jit_block_trampoline));
+      out[0] = 0xFF; out[1] = 0xD0; out += 2;  // call rax
+      out[0] = 0x48; out[1] = 0x83; out[2] = 0xC4; out[3] = 0x08; out += 4;  // add rsp, 8
+      out[0] = 0xC3;
+    }
+    if (::mprotect(region, alloc_size, PROT_READ | PROT_EXEC) != 0) {
+      ::munmap(region, alloc_size);
+      throw std::runtime_error("jit: mprotect failed");
+    }
+
+    Entry entry;
+    entry.start_pc = start_pc;
+    entry.pcs = pcs;
+    entry.backend = Vm1JitBackend::x64;
+    entry.fn = reinterpret_cast<JitEntry>(region);
+    entry.code_size = alloc_size;
+    entry.is_trace = trace;
+    entry.code_region = region;
+    entry.code_region_size = alloc_size;
+    entry.trace_heap = trace ? pcs_copy : nullptr;
+    return entry;
+#else
+    (void)module;
+    (void)start_pc;
+    (void)pcs;
+    (void)trace;
+    throw std::runtime_error("jit: x64 backend unavailable");
+#endif
+  }
+
+  Entry compile_entry(const Vm1Module& module, std::uint32_t start_pc, const std::vector<std::uint32_t>& pcs, bool trace) {
+    const auto requested = parse_backend_env();
+    if (requested == Vm1JitBackend::off) {
+      throw std::runtime_error("jit: backend disabled");
+    }
+    if (requested == Vm1JitBackend::x64) {
+      try {
+        return compile_x64_entry(module, start_pc, pcs, trace);
+      } catch (const std::exception& ex) {
+        emit_audit("jit_fallback_backend", ex.what(), start_pc);
+        return compile_c_entry(module, start_pc, pcs, trace);
+      }
+    }
+    return compile_c_entry(module, start_pc, pcs, trace);
+  }
+};
+
+Vm1Jit& Vm1Jit::instance() {
+  static Vm1Jit jit;
+  return jit;
+}
+
+Vm1Jit::Vm1Jit() : impl_(new Impl{}) {
+  impl_->refresh_config_from_env();
+#if defined(_WIN32)
+  impl_->cache_dir = std::filesystem::temp_directory_path() / ("vmp-jit-" + std::to_string(::GetCurrentProcessId()));
+#else
+  impl_->cache_dir = std::filesystem::temp_directory_path() / ("vmp-jit-" + std::to_string(::getpid()));
+#endif
+}
+
+Vm1Jit::~Vm1Jit() { delete impl_; }
+
+Vm1JitBackend Vm1Jit::selected_backend() const {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return parse_backend_env();
+}
+
+std::string Vm1Jit::selected_backend_name() const { return backend_name(selected_backend()); }
+
+bool Vm1Jit::enabled() const { return selected_backend() != Vm1JitBackend::off; }
+
+void Vm1Jit::set_audit_writer(vmp::runtime::audit::AuditWriter* writer) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->audit = writer;
+}
+
+void Vm1Jit::set_module_cache_budget_bytes(std::size_t value) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->config.module_cache_budget_bytes = value;
+}
+
+std::size_t Vm1Jit::module_cache_budget_bytes() const {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  return impl_->config.module_cache_budget_bytes;
+}
+
+JitEntry Vm1Jit::compile_if_needed(const Vm1Module& module, std::uint32_t block_start_pc, std::uint64_t hit_count) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->refresh_config_from_env();
+  if (parse_backend_env() == Vm1JitBackend::off) {
+    return nullptr;
+  }
+  auto& cache = impl_->module_cache(module.id());
+  if (auto* ready = impl_->find_ready_entry(cache, block_start_pc, hit_count); ready != nullptr) {
+    return ready->fn;
+  }
+  if (cache.entries.find(block_start_pc) != cache.entries.end()) {
+    return nullptr;
+  }
+  try {
+    auto entry = impl_->compile_entry(module, block_start_pc, {block_start_pc}, false);
+    entry.activation_hit = 2;
+    entry.stats.compile_count = 1;
+    entry.stats.trace = false;
+    entry.stats.code_size = entry.code_size;
+    impl_->evict_if_needed(cache, module.id(), entry.code_size);
+    entry.lru_tick = ++cache.lru_clock;
+    cache.used += entry.code_size;
+    cache.entries[block_start_pc] = std::move(entry);
+    impl_->emit_audit("jit_compile", "module=" + std::to_string(module.id()) + " pc=" + std::to_string(block_start_pc),
+                      block_start_pc);
+  } catch (const std::exception& ex) {
+    impl_->emit_audit("jit_fallback_backend", ex.what(), block_start_pc);
+  }
+  return nullptr;
+}
+
+void Vm1Jit::record_entry_trampoline_hit(const Vm1Module& module, std::uint32_t block_start_pc) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  auto mod_it = impl_->modules.find(module.id());
+  if (mod_it == impl_->modules.end()) {
+    return;
+  }
+  auto entry_it = mod_it->second.entries.find(block_start_pc);
+  if (entry_it == mod_it->second.entries.end()) {
+    return;
+  }
+  entry_it->second.stats.entry_trampoline_hits++;
+}
+
+void Vm1Jit::record_trace_observation(const Vm1Module& module, const std::vector<std::uint32_t>& block_chain) {
+  if (block_chain.size() < 2) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->refresh_config_from_env();
+  if (parse_backend_env() == Vm1JitBackend::off) {
+    return;
+  }
+  auto& cache = impl_->module_cache(module.id());
+  const auto start = block_chain.front();
+  if (module.block_hit_count(start) < impl_->config.trace_hot_threshold) {
+    return;
+  }
+  auto& candidate = cache.trace_candidates[start];
+  if (candidate.pcs == block_chain) {
+    candidate.stable_hits++;
+  } else {
+    candidate.pcs = block_chain;
+    candidate.stable_hits = 1;
+  }
+  if (candidate.stable_hits < impl_->config.trace_stable_threshold) {
+    return;
+  }
+  auto existing = cache.entries.find(start);
+  if (existing != cache.entries.end() && existing->second.is_trace && existing->second.pcs == block_chain) {
+    return;
+  }
+  try {
+    auto entry = impl_->compile_entry(module, start, block_chain, true);
+    entry.activation_hit = module.block_hit_count(start) + 1;
+    entry.stats.compile_count = 1;
+    entry.stats.trace = true;
+    entry.stats.code_size = entry.code_size;
+    impl_->evict_if_needed(cache, module.id(), entry.code_size);
+    if (existing != cache.entries.end()) {
+      cache.used -= existing->second.code_size;
+      cache.entries.erase(existing);
+    }
+    entry.lru_tick = ++cache.lru_clock;
+    cache.used += entry.code_size;
+    cache.entries[start] = std::move(entry);
+    impl_->emit_audit("jit_trace_compile",
+                      "module=" + std::to_string(module.id()) + " trace=" + join_trace(block_chain), start);
+  } catch (const std::exception& ex) {
+    impl_->emit_audit("jit_fallback_backend", ex.what(), start);
+  }
+}
+
+void Vm1Jit::invalidate_all() {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->modules.clear();
+  impl_->emit_audit("jit_invalidate", "all");
+}
+
+void Vm1Jit::invalidate_module(std::uint64_t module_id) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->modules.erase(module_id);
+  impl_->emit_audit("jit_invalidate", "module=" + std::to_string(module_id));
+}
+
+void Vm1Jit::invalidate_entry(std::uint64_t module_id, std::uint32_t block_start_pc) {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  auto mod_it = impl_->modules.find(module_id);
+  if (mod_it == impl_->modules.end()) {
+    return;
+  }
+  auto entry_it = mod_it->second.entries.find(block_start_pc);
+  if (entry_it == mod_it->second.entries.end()) {
+    return;
+  }
+  mod_it->second.used -= entry_it->second.code_size;
+  mod_it->second.entries.erase(entry_it);
+  impl_->emit_audit("jit_invalidate",
+                    "module=" + std::to_string(module_id) + " pc=" + std::to_string(block_start_pc), block_start_pc);
+}
+
+Vm1JitEntryStats Vm1Jit::entry_stats(std::uint64_t module_id, std::uint32_t block_start_pc) const {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  auto mod_it = impl_->modules.find(module_id);
+  if (mod_it == impl_->modules.end()) {
+    return {};
+  }
+  auto entry_it = mod_it->second.entries.find(block_start_pc);
+  if (entry_it == mod_it->second.entries.end()) {
+    return {};
+  }
+  return entry_it->second.stats;
+}
+
+std::size_t Vm1Jit::module_entry_count(std::uint64_t module_id) const {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  auto mod_it = impl_->modules.find(module_id);
+  return mod_it == impl_->modules.end() ? 0u : mod_it->second.entries.size();
+}
+
+std::size_t Vm1Jit::module_cache_bytes(std::uint64_t module_id) const {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  auto mod_it = impl_->modules.find(module_id);
+  return mod_it == impl_->modules.end() ? 0u : mod_it->second.used;
+}
+
+void Vm1Jit::reset_for_tests() {
+  std::lock_guard<std::mutex> lock(impl_->mutex);
+  impl_->modules.clear();
+  impl_->refresh_config_from_env();
+}
+
+const char* Facade::status() const noexcept { return "runtime_jit_ready"; }
 
 }  // namespace vmp::runtime::jit

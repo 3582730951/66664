@@ -66,7 +66,7 @@ void ReactionDispatcher::dispatch(const AnalysisEventRecord& record, ReactionPol
         break;
       }
       case ReactionPolicy::log:
-        // TODO(subtask_04): integrate log-state-machine behavior.
+        writer.append(record);
         break;
       case ReactionPolicy::degrade:
         // TODO(subtask_04): integrate degrade-state-machine behavior.

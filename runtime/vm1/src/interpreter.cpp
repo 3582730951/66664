@@ -6,9 +6,19 @@
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
+
+#if VMP_WITH_JIT
+#include <vmp/runtime/jit/vm1_jit.h>
+#endif
 
 namespace vmp::runtime::vm1 {
 namespace {
+
+struct BlockExecutionResult {
+  std::uint32_t next_pc = 0;
+  bool halted = false;
+};
 
 std::uint16_t read_u16(const std::vector<std::uint8_t>& code, std::size_t& pc) {
   if (pc + 2 > code.size()) {
@@ -175,22 +185,19 @@ vmp::runtime::bridge::Domain bridge_domain_from_byte(std::uint8_t raw) {
   }
 }
 
-}  // namespace
-
-ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
+BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t start_pc) {
   if (context.module == nullptr) {
     throw VmException(VmTrapCode::invalid_module, 0, "vm1: null module");
   }
-  if (context.pc > context.module->code.size()) {
-    throw VmException(VmTrapCode::invalid_module, context.pc, "vm1: entry pc out of range");
+  if (start_pc >= context.module->code.size()) {
+    throw VmException(VmTrapCode::invalid_module, start_pc, "vm1: pc out of range");
   }
-  try {
+  context.execution_halted = false;
+  context.pc = start_pc;
   bool halted = false;
-  while (!halted) {
-    bool control_flow_changed = false;
-    if (context.pc >= context.module->code.size()) {
-      throw VmException(VmTrapCode::invalid_module, context.pc, "vm1: pc out of range");
-    }
+  bool control_flow_changed = false;
+  do {
+    control_flow_changed = false;
     const std::uint32_t instruction_pc = context.pc;
     std::size_t cursor = context.pc;
     const auto opcode = static_cast<Opcode>(context.module->code[cursor++]);
@@ -276,29 +283,26 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
                                                         static_cast<std::int64_t>(result));
             break;
           }
-          case Opcode::mul: {
+          case Opcode::mul:
             result = lhs * rhs;
             set_common_flags(context, result);
             context.flags.carry = false;
             context.flags.overflow = false;
             break;
-          }
-          case Opcode::div: {
+          case Opcode::div:
             if (rhs == 0) {
               raise_trap(context, VmTrapCode::divide_by_zero, "vm1: divide by zero");
             }
             result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lhs) / static_cast<std::int64_t>(rhs));
             set_logic_flags(context, result);
             break;
-          }
-          case Opcode::mod: {
+          case Opcode::mod:
             if (rhs == 0) {
               raise_trap(context, VmTrapCode::divide_by_zero, "vm1: modulo by zero");
             }
             result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lhs) % static_cast<std::int64_t>(rhs));
             set_logic_flags(context, result);
             break;
-          }
           case Opcode::bit_and:
             result = lhs & rhs;
             set_logic_flags(context, result);
@@ -457,6 +461,7 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
         } catch (const vmp::runtime::bridge::BridgeException& ex) {
           raise_trap(context, VmTrapCode::bridge_error, ex.what());
         }
+        control_flow_changed = true;
         break;
       }
       case Opcode::domain_ret:
@@ -466,7 +471,6 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
       case Opcode::load_transient_string: {
         const auto dst = context.module->code.at(cursor++);
         const auto id = read_u32(context.module->code, cursor);
-        // JIT hook: future JIT paths must not constant-propagate decrypted transient bytes into caches.
         context.vr.at(dst) = context.materialize_transient_string(id);
         set_logic_flags(context, context.vr.at(dst));
         break;
@@ -485,12 +489,81 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
     if (!halted && !control_flow_changed) {
       context.pc = static_cast<std::uint32_t>(cursor);
     }
+  } while (!halted && !control_flow_changed);
+
+  context.execution_halted = halted;
+  return BlockExecutionResult{context.pc, halted};
+}
+
+}  // namespace
+
+ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
+  if (context.module == nullptr) {
+    throw VmException(VmTrapCode::invalid_module, 0, "vm1: null module");
   }
-  return ExecutionResult{context.vr[0], context.vfr[0]};
+  if (context.pc > context.module->code.size()) {
+    throw VmException(VmTrapCode::invalid_module, context.pc, "vm1: entry pc out of range");
+  }
+  try {
+    while (!context.execution_halted) {
+      const auto block_pc = context.pc;
+      std::vector<std::uint32_t> observed_trace;
+      observed_trace.push_back(block_pc);
+#if VMP_WITH_JIT
+      const auto hit_count = context.module->note_block_hit(block_pc);
+      if (auto* entry = vmp::runtime::jit::Vm1Jit::instance().compile_if_needed(*context.module, block_pc, hit_count); entry != nullptr) {
+        vmp::runtime::jit::Vm1Jit::instance().record_entry_trampoline_hit(*context.module, block_pc);
+        const auto next_pc = entry(&context);
+        context.pc = next_pc;
+        if (!context.execution_halted) {
+          observed_trace.push_back(next_pc);
+        }
+        vmp::runtime::jit::Vm1Jit::instance().record_trace_observation(*context.module, observed_trace);
+        continue;
+      }
+#endif
+      auto result = execute_basic_block(context, block_pc);
+      context.pc = result.next_pc;
+      if (!result.halted) {
+        observed_trace.push_back(result.next_pc);
+      }
+#if VMP_WITH_JIT
+      vmp::runtime::jit::Vm1Jit::instance().record_trace_observation(*context.module, observed_trace);
+#endif
+    }
+    return ExecutionResult{context.vr[0], context.vfr[0]};
   } catch (...) {
     context.clear_all_transient_strings();
     throw;
   }
+}
+
+extern "C" std::uint32_t vmp_vm1_jit_execute_block(Vm1Context* context, std::uint32_t start_pc) {
+  const auto result = execute_basic_block(*context, start_pc);
+  context->pc = result.next_pc;
+  context->execution_halted = result.halted;
+  return result.next_pc;
+}
+
+extern "C" std::uint32_t vmp_vm1_jit_execute_trace(Vm1Context* context, const std::uint32_t* block_pcs,
+                                                     std::size_t block_count) {
+  if (context == nullptr || block_pcs == nullptr || block_count == 0) {
+    return 0;
+  }
+  std::uint32_t next_pc = context->pc;
+  for (std::size_t i = 0; i < block_count; ++i) {
+    const auto result = execute_basic_block(*context, block_pcs[i]);
+    next_pc = result.next_pc;
+    context->pc = next_pc;
+    context->execution_halted = result.halted;
+    if (result.halted) {
+      return next_pc;
+    }
+    if (i + 1 < block_count && next_pc != block_pcs[i + 1]) {
+      return next_pc;
+    }
+  }
+  return next_pc;
 }
 
 }  // namespace vmp::runtime::vm1

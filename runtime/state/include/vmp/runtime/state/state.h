@@ -35,6 +35,7 @@ class RuntimeState {
 
   bool init_once(vmp::runtime::audit::AuditWriter* audit, RuntimeConfig config) noexcept;
   void observe(RuntimeEventKind kind) noexcept;
+  void detector_invalidate_module(std::uint64_t module_id) noexcept;
   void set_flag(RuntimeFlag flag, bool enabled = true) noexcept;
   bool check_flag(RuntimeFlag flag) const noexcept;
   vmp::runtime::audit::AuditWriter* get_audit() const noexcept;

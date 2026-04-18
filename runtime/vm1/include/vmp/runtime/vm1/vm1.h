@@ -67,6 +67,12 @@ class Vm1Module {
   std::uint32_t entry_pc = 0;
   std::vector<std::uint8_t> code;
   std::vector<ConstPoolEntry> const_pool;
+  std::uint64_t runtime_id = 0;
+  mutable std::unordered_map<std::uint32_t, std::uint64_t> block_hit_counters;
+
+  std::uint64_t id() const noexcept { return runtime_id; }
+  std::uint64_t note_block_hit(std::uint32_t pc) const { return ++block_hit_counters[pc]; }
+  std::uint64_t block_hit_count(std::uint32_t pc) const { auto it = block_hit_counters.find(pc); return it == block_hit_counters.end() ? 0u : it->second; }
 
   static Vm1Module load_from_file(const std::string& path);
   static Vm1Module load_from_bytes(const std::vector<std::uint8_t>& bytes);
@@ -110,6 +116,8 @@ class Vm1Context {
   void release_transient_string(std::uint64_t handle);
   std::string transient_string(std::uint64_t handle) const;
   std::size_t active_transient_strings() const noexcept;
+  std::vector<std::uint8_t> debug_last_released_bytes(std::uint64_t handle) const;
+  bool debug_last_release_zeroed(std::uint64_t handle) const;
 
  public:
   friend class Vm1Interpreter;
@@ -137,13 +145,18 @@ class Vm1Context {
   std::vector<CallFrame> frames_;
   std::vector<std::uint64_t> root_transient_handles_;
   std::unordered_map<std::uint64_t, std::unique_ptr<vmp::runtime::strings::TransientView>> transient_strings_;
+  std::unordered_map<std::uint64_t, std::vector<std::uint8_t>> released_transient_debug_;
   std::uint64_t next_transient_handle_ = 1;
+  bool execution_halted = false;
 };
 
 class Vm1Interpreter {
  public:
   ExecutionResult execute(Vm1Context& context);
 };
+
+extern "C" std::uint32_t vmp_vm1_jit_execute_block(Vm1Context* context, std::uint32_t start_pc);
+extern "C" std::uint32_t vmp_vm1_jit_execute_trace(Vm1Context* context, const std::uint32_t* block_pcs, std::size_t block_count);
 
 Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags = 0);
 std::string disassemble_module(const Vm1Module& module);

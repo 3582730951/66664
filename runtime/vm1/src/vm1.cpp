@@ -1,6 +1,7 @@
 #include <vmp/runtime/vm1/vm1.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
@@ -23,6 +24,8 @@ namespace vmp::runtime::vm1 {
 namespace {
 
 using ByteVector = std::vector<std::uint8_t>;
+std::atomic<std::uint64_t> g_next_vm1_module_id{1};
+
 
 std::string trim(std::string_view value) {
   std::size_t begin = 0;
@@ -601,6 +604,7 @@ VmException::VmException(VmTrapCode code, std::uint32_t pc, std::string message)
 Vm1Context::Vm1Context(const Vm1Module& module_in, std::size_t stack_size)
     : pc(module_in.entry_pc), module(&module_in), stack_(stack_size, 0) {}
 
+
 std::size_t Vm1Context::stack_size() const noexcept { return stack_.size(); }
 
 std::uint64_t Vm1Context::stack_top() const noexcept { return stack_top_; }
@@ -630,6 +634,7 @@ std::uint64_t Vm1Context::materialize_transient_string(std::uint32_t id) {
     return vmp::runtime::strings::TransientView(module->const_pool[id].bytes);
   }();
   const auto handle = next_transient_handle_++;
+  released_transient_debug_.erase(handle);
   transient_strings_[handle] = std::make_unique<vmp::runtime::strings::TransientView>(std::move(view));
   register_transient_handle(handle);
   return handle;
@@ -641,6 +646,7 @@ void Vm1Context::release_transient_string(std::uint64_t handle) {
     throw VmException(VmTrapCode::invalid_constant, pc, "vm1: transient string handle not found");
   }
   remove_transient_handle_owner(handle);
+  released_transient_debug_[handle] = it->second->debug_zeroized_snapshot();
   transient_strings_.erase(it);
 }
 
@@ -653,6 +659,16 @@ std::string Vm1Context::transient_string(std::uint64_t handle) const {
 }
 
 std::size_t Vm1Context::active_transient_strings() const noexcept { return transient_strings_.size(); }
+
+std::vector<std::uint8_t> Vm1Context::debug_last_released_bytes(std::uint64_t handle) const {
+  auto it = released_transient_debug_.find(handle);
+  return it == released_transient_debug_.end() ? std::vector<std::uint8_t>{} : it->second;
+}
+
+bool Vm1Context::debug_last_release_zeroed(std::uint64_t handle) const {
+  const auto bytes = debug_last_released_bytes(handle);
+  return !bytes.empty() && std::all_of(bytes.begin(), bytes.end(), [](std::uint8_t value) { return value == 0; });
+}
 
 void Vm1Context::register_transient_handle(std::uint64_t handle) {
   if (frames_.empty()) {
@@ -686,6 +702,7 @@ void Vm1Context::clear_frame_transient_strings() {
 
 void Vm1Context::clear_all_transient_strings() noexcept {
   transient_strings_.clear();
+  released_transient_debug_.clear();
   root_transient_handles_.clear();
   for (auto& frame : frames_) {
     frame.transient_handles.clear();
@@ -706,6 +723,7 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
     throw std::runtime_error("vm1: module too small");
   }
   Vm1Module module;
+  module.runtime_id = g_next_vm1_module_id.fetch_add(1);
   if (!std::equal(kVm1Magic.begin(), kVm1Magic.end(), bytes.begin())) {
     throw std::runtime_error("vm1: bad magic");
   }
@@ -774,6 +792,7 @@ void Vm1Module::save_to_file(const std::string& path) const {
 Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags) {
   const auto program = parse_assembly(text);
   Vm1Module module;
+  module.runtime_id = g_next_vm1_module_id.fetch_add(1);
   module.module_flags = module_flags;
   module.entry_pc = 0;
   for (const auto& [id, value] : program.strings) {

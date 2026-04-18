@@ -408,3 +408,56 @@ if(WIN32)
   set_tests_properties(loader_windows_tls_callback_presence PROPERTIES PASS_REGULAR_EXPRESSION "PE TLS callback section OK")
 endif()
 
+
+# runtime/vm1 JIT tests
+function(vmp_add_vm1_jit_test target source)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE vmp_runtime_vm1 vmp_runtime_strings vmp_runtime_audit vmp_runtime_state)
+  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+  if(UNIX AND NOT APPLE)
+    target_link_options(${target} PRIVATE -Wl,--export-dynamic)
+  elseif(APPLE)
+    target_link_options(${target} PRIVATE -Wl,-export_dynamic)
+  endif()
+  add_test(NAME ${target} COMMAND $<TARGET_FILE:${target}>)
+  set_tests_properties(${target} PROPERTIES PASS_REGULAR_EXPRESSION "${target} OK")
+endfunction()
+
+vmp_add_vm1_jit_test(jit_correctness_add_loop ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_correctness_add_loop.cpp)
+vmp_add_vm1_jit_test(jit_correctness_fib_recursive ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_correctness_fib_recursive.cpp)
+vmp_add_vm1_jit_test(jit_string_barrier ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_string_barrier.cpp)
+vmp_add_vm1_jit_test(jit_domain_call_no_inlining ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_domain_call_no_inlining.cpp)
+vmp_add_vm1_jit_test(jit_invalidate_key_rotation ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_invalidate_key_rotation.cpp)
+vmp_add_vm1_jit_test(jit_cache_size_bound ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_cache_size_bound.cpp)
+vmp_add_vm1_jit_test(jit_backend_switch ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_backend_switch.cpp)
+vmp_add_vm1_jit_test(jit_disabled ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_disabled.cpp)
+vmp_add_vm1_jit_test(jit_no_degrade_to_native ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1_jit/jit_no_degrade_to_native.cpp)
+
+set(VMP_VM1_EXECUTABLE_TARGETS
+  vm1_asm_round_trip
+  vm1_arith_ops
+  vm1_control_flow
+  vm1_call_ret
+  vm1_cross_domain_call
+  vm1_exceptions
+  vm1_breakpoint_event
+  vm1_bench
+  vm1_load_transient_string_integration
+  jit_correctness_add_loop
+  jit_correctness_fib_recursive
+  jit_string_barrier
+  jit_domain_call_no_inlining
+  jit_invalidate_key_rotation
+  jit_cache_size_bound
+  jit_backend_switch
+  jit_disabled
+  jit_no_degrade_to_native)
+foreach(target IN LISTS VMP_VM1_EXECUTABLE_TARGETS)
+  if(TARGET ${target})
+    if(UNIX AND NOT APPLE)
+      target_link_options(${target} PRIVATE -Wl,--export-dynamic)
+    elseif(APPLE)
+      target_link_options(${target} PRIVATE -Wl,-export_dynamic)
+    endif()
+  endif()
+endforeach()

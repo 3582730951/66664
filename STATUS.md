@@ -582,3 +582,58 @@
     - `VMP_DISABLE_LOADER=1 VMP_AUDIT_PATH=/tmp/manual_loader_disabled.log ./build/tools/vmp-loader-selftest` 后无日志内容。
     - `./build/tools/vmp-protect --platform linux --policy tests/policy/examples/good.json --validate-only`：退出码 `0`。
   - clean-copy 验证：复制到 `/tmp/vmp_clean_copy`（排除 `.git` / `build*` / `target` 等生成物）后重跑 `cmake -S . -B build -G Ninja && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`，结果通过（`CLEAN_COPY_OK`）。
+
+### subtask_10
+- 本轮清单：
+  - 实现 `runtime/jit/` 的 `Vm1Jit`：VM1 block-level / trace-level JIT 管理器、per-module code cache、`(module_id, block_start_pc)` entry 映射、LRU 驱逐、失效 API 与审计事件。
+  - 落地两套后端：
+    - portable C backend：生成临时 C 源并经 `cc -shared -O2 -fPIC` 编译为 `.so`，`dlopen/dlsym` 获取入口；
+    - Linux x86_64 backend：自有 emitter 生成 RW→RX x64 stub，通过 trampoline 进入 VM1 helper。
+  - 将 VM1 解释器重构为 basic-block dispatch 循环，接入热度计数、JIT trampoline、trace 观察与 `load_transient_string` / `domain_call` barrier 语义。
+  - 扩展 `RuntimeState`：`observe(key_rotated|integrity_failed)` 触发 `invalidate_all()`；新增 `detector_invalidate_module(module_id)`。
+  - 扩展 transient string debug 能力：release 后保留 zeroized snapshot 供 JIT barrier 测试验证。
+  - 更新 `vmp-vm1-run`：支持 `--jit=c|x64|off`，`VMP_JIT_VERBOSE=1` 时打印 `jit backend=X`。
+  - 新增 `tests/runtime_vm1_jit/` 真测 9 项，并将 VM1 相关可执行目标统一加上 `--export-dynamic`，保证 JIT C backend 在测试/runner 中可解析 trampoline。
+  - 更新 `runtime/jit/README.md` 与 `runtime/vm1/README.md`。
+- 变更文件：
+  - `runtime/audit/src/reaction.cpp`
+  - `runtime/jit/CMakeLists.txt`
+  - `runtime/jit/README.md`
+  - `runtime/jit/include/vmp/runtime/jit/jit.h`
+  - `runtime/jit/include/vmp/runtime/jit/vm1_jit.h`
+  - `runtime/jit/rust_jit/src/lib.rs`
+  - `runtime/jit/src/jit.cpp`
+  - `runtime/state/CMakeLists.txt`
+  - `runtime/state/include/vmp/runtime/state/state.h`
+  - `runtime/state/src/state.cpp`
+  - `runtime/strings/include/vmp/runtime/strings/cipher.h`
+  - `runtime/strings/src/strings.cpp`
+  - `runtime/vm1/CMakeLists.txt`
+  - `runtime/vm1/README.md`
+  - `runtime/vm1/include/vmp/runtime/vm1/vm1.h`
+  - `runtime/vm1/src/interpreter.cpp`
+  - `runtime/vm1/src/vm1.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/runtime_vm1_jit/test_common.h`
+  - `tests/runtime_vm1_jit/jit_correctness_add_loop.cpp`
+  - `tests/runtime_vm1_jit/jit_correctness_fib_recursive.cpp`
+  - `tests/runtime_vm1_jit/jit_string_barrier.cpp`
+  - `tests/runtime_vm1_jit/jit_domain_call_no_inlining.cpp`
+  - `tests/runtime_vm1_jit/jit_invalidate_key_rotation.cpp`
+  - `tests/runtime_vm1_jit/jit_cache_size_bound.cpp`
+  - `tests/runtime_vm1_jit/jit_backend_switch.cpp`
+  - `tests/runtime_vm1_jit/jit_disabled.cpp`
+  - `tests/runtime_vm1_jit/jit_no_degrade_to_native.cpp`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_vm1_run.cpp`
+  - `STATUS.md`
+- 验证：
+  - `cmake --build build -j 4`：通过。
+  - `cd build && ctest --output-on-failure`：`73/73` 通过（含 9 个新增 JIT 测试）。
+  - `cargo test --workspace`：通过。
+  - `/tmp/vmp_subtask10_clean` clean-copy：重新 `cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64 && cmake --build build -j 4 && cd build && ctest --output-on-failure && cd .. && cargo test --workspace`，全部通过。
+- 未完成项：
+  - VM2 JIT 仍待 subtask 11。
+  - 当前 trace 观测/升级为稳定二块 super-block 起步实现，后续可在不改变保护语义的前提下继续扩展 trace 拼接深度与 profile 融合。
+- 下一子任务建议：
+  - 进入 subtask 11，按 plan §7.3 实现 VM2 function-level JIT，并复用本轮完成的失效/审计/缓存策略骨架。

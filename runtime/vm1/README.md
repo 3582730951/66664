@@ -138,3 +138,11 @@ base:
 
 - 汇编：`build/tools/vmp-vm1-asm input.vm1s output.vm1`
 - 运行：`build/tools/vmp-vm1-run [--audit-path audit.log] [--string-pool pool.bin --string-idx pool.idx.json --key-env VMP_STRING_MASTER_KEY] [--native-print-string <id>] module.vm1 [args...]`
+
+## JIT 集成（subtask 10）
+
+- `Vm1Interpreter` 在 basic-block dispatch 前会累积 block 热度，并通过 `Vm1Jit` 查询/触发按需编译。
+- 首次执行 block 时只编译不跳转；第二次开始若 entry 已激活，则通过 `JitEntry(Vm1Context*) -> next_pc` 回到解释主循环。
+- 热块默认在命中 `64` 次后记录稳定 trace，稳定 `16` 次后升级为 trace super-block。
+- `load_transient_string` / `release_transient_string`、`domain_call` / `domain_ret` 保持 JIT barrier 语义，不做明文缓存或跨域常量传播。
+- `Vm1Module` 维护 per-block 热度计数；`Vm1Context` 提供 transient release debug snapshot，供字符串 barrier/JIT 测试验证。

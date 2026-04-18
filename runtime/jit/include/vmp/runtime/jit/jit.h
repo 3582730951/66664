@@ -1,9 +1,3 @@
 #pragma once
 
-namespace vmp::runtime::jit {
-
-struct Facade {
-  const char* status() const noexcept;
-};
-
-}  // namespace vmp::runtime::jit
+#include <vmp/runtime/jit/vm1_jit.h>

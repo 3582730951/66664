@@ -78,6 +78,7 @@ class TransientView {
   std::size_t size() const noexcept { return size_; }
   std::string_view view() const noexcept { return std::string_view(data(), size_); }
   explicit operator bool() const noexcept { return data_ != nullptr; }
+  std::vector<std::uint8_t> debug_zeroized_snapshot();
 
  private:
   void reset() noexcept;

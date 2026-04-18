@@ -8,6 +8,7 @@
 #include <vmp/runtime/audit/audit.h>
 #include <vmp/runtime/audit/reaction.h>
 #include <vmp/runtime/bridge/bridge.h>
+#include <vmp/runtime/jit/vm1_jit.h>
 #include <vmp/runtime/strings/cipher.h>
 #include <vmp/runtime/strings/keyctx.h>
 #include <vmp/runtime/vm1/vm1.h>
@@ -22,9 +23,18 @@ struct Options {
   std::string string_idx_path;
   std::string key_env = "VMP_STRING_MASTER_KEY";
   std::uint32_t native_print_string = 0;
+  std::string jit = "auto";
   std::string module_path;
   std::vector<std::string> args;
 };
+
+void set_env_var(const char* name, const std::string& value) {
+#if defined(_WIN32)
+  _putenv_s(name, value.c_str());
+#else
+  ::setenv(name, value.c_str(), 1);
+#endif
+}
 
 Options parse_args(int argc, char** argv) {
   Options options;
@@ -40,6 +50,10 @@ Options parse_args(int argc, char** argv) {
       options.key_env = argv[++argi];
     } else if (arg == "--native-print-string") {
       options.native_print_string = static_cast<std::uint32_t>(std::stoul(argv[++argi]));
+    } else if (arg == "--jit") {
+      options.jit = argv[++argi];
+    } else if (arg.rfind("--jit=", 0) == 0) {
+      options.jit = arg.substr(6);
     } else if (arg.rfind("--", 0) == 0) {
       throw std::runtime_error("unknown argument: " + arg);
     } else if (options.module_path.empty()) {
@@ -51,6 +65,9 @@ Options parse_args(int argc, char** argv) {
   if (options.module_path.empty()) {
     throw std::runtime_error("module path is required");
   }
+  if (options.jit != "auto" && options.jit != "off" && options.jit != "c" && options.jit != "x64") {
+    throw std::runtime_error("--jit must be auto|off|c|x64");
+  }
   return options;
 }
 
@@ -59,6 +76,14 @@ Options parse_args(int argc, char** argv) {
 int main(int argc, char** argv) {
   try {
     const auto options = parse_args(argc, argv);
+    if (options.jit != "auto") {
+      set_env_var("VMP_JIT_BACKEND", options.jit);
+    }
+    vmp::runtime::jit::Vm1Jit::instance().reset_for_tests();
+    if (const char* verbose = std::getenv("VMP_JIT_VERBOSE"); verbose != nullptr && std::string(verbose) == "1") {
+      std::cout << "jit backend=" << vmp::runtime::jit::Vm1Jit::instance().selected_backend_name() << '\n';
+    }
+
     const auto module = vmp::runtime::vm1::Vm1Module::load_from_file(options.module_path);
     vmp::runtime::vm1::Vm1Context context(module);
     for (int i = 0; i < static_cast<int>(options.args.size()) && i < 8; ++i) {
@@ -72,6 +97,7 @@ int main(int argc, char** argv) {
       dispatcher = std::make_unique<vmp::runtime::audit::ReactionDispatcher>(*writer,
                                                                              vmp::runtime::audit::ReactionPolicy::audit_only);
       context.audit_dispatcher = dispatcher.get();
+      vmp::runtime::jit::Vm1Jit::instance().set_audit_writer(writer.get());
     }
 
     if (!options.string_pool_path.empty() || !options.string_idx_path.empty()) {
