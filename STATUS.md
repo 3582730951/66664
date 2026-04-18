@@ -342,3 +342,57 @@
   - 本轮要求范围内无未完成项。
 - 下一子任务建议：
   - 等待 supervisor 检查 CI；若仍有平台特定失败，再按失败 job 日志做定点修复。
+
+### subtask_06
+- 本轮清单：
+  - 实现 `runtime/strings`：纯 C++ `ChaCha20`、`SHA256`、`HMAC-SHA256`、`HKDF-SHA256`、`StringPool`、`TransientView`、`secure_memzero()`、`ScopedCurrentPool` / `VMP_STRING_USE`。
+  - 加入字符串记录格式：`ChaCha20(4-byte length prefix || plaintext)` + `HMAC-SHA256(nonce || encrypted_payload)`，索引 JSON 同时携带 salt/KDF 元数据与 `plaintext_budget`。
+  - 实现 `tools/src/vmp_string_protect.cpp` 与 `tools/src/string_protect_common.h`：从带 `vm_string` 条目和 `value/string_id` 的 policy JSON 生成 `string_pool.bin`、`string_pool.idx.json`、`key_derivation.json`，master key 仅经 CLI/env/stdin 注入，不落盘。
+  - 扩展 `vmp-protect --protect-strings`：在保留 Policy IR 校验的同时，允许 policy 中存在 `string_id/value` 工具字段；可直接生成 pool / idx / kdf。
+  - 扩展 `vmp-vm1-run`：支持 `--string-pool` / `--string-idx` / `--key-env` 加载加密字符串池，并提供 `--native-print-string <id>` 便于集成测试/演示。
+  - 回改 VM1：新增 `release_transient_string` opcode（`0x41`），DSL 支持 `load_tstr vrX, &sidN` / `release_tstr vrX`；`load_tstr` 走 `StringPool` 瞬时解密；显式释放或在 `ret`/异常 unwind 时自动擦除 handle。
+  - 审计集成：解密异常 / 池损坏 / key mismatch 记 `string_pool_error`；`plaintext_budget=none` 的条目运行时拒绝并记 `plaintext_budget_violation`。
+  - 新增真测：RFC/NIST/RFC5869 向量、零化验证、8 线程并发、pool corruption audit、VM1 transient-string bridge 集成、`vmp-string-protect` round-trip、`vmp-protect --protect-strings`。
+  - 更新 `runtime/strings/README.md` 与 `runtime/vm1/README.md`：格式、KDF、RAII 擦除、VM1 opcode、CLI 用法、JIT 约束 hook 注释。
+- 本轮变更文件：
+  - `runtime/strings/CMakeLists.txt`
+  - `runtime/strings/README.md`
+  - `runtime/strings/include/vmp/runtime/strings/cipher.h`
+  - `runtime/strings/include/vmp/runtime/strings/keyctx.h`
+  - `runtime/strings/include/vmp/runtime/strings/use.h`
+  - `runtime/strings/include/vmp/runtime/strings/strings.h`
+  - `runtime/strings/src/keyctx.cpp`
+  - `runtime/strings/src/strings.cpp`
+  - `runtime/strings/rust_strings/src/lib.rs`
+  - `runtime/vm1/CMakeLists.txt`
+  - `runtime/vm1/README.md`
+  - `runtime/vm1/include/vmp/runtime/vm1/isa.h`
+  - `runtime/vm1/include/vmp/runtime/vm1/vm1.h`
+  - `runtime/vm1/src/interpreter.cpp`
+  - `runtime/vm1/src/vm1.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/strings/test_common.h`
+  - `tests/strings/crypto_vectors.cpp`
+  - `tests/strings/transient_view_zeroization.cpp`
+  - `tests/strings/concurrency_8_threads.cpp`
+  - `tests/strings/pool_corruption_detected.cpp`
+  - `tests/strings/vmp_string_protect_roundtrip.py`
+  - `tests/strings/vmp_protect_strings.py`
+  - `tests/runtime_vm1/strings_integration/vm1_load_transient_string_integration.cpp`
+  - `tools/CMakeLists.txt`
+  - `tools/src/string_protect_common.h`
+  - `tools/src/vmp_string_protect.cpp`
+  - `tools/src/vmp_protect.cpp`
+  - `tools/src/vmp_vm1_run.cpp`
+  - `STATUS.md`
+- 未完成项：
+  - 本轮要求范围内无未完成项。
+  - 后续仅保留 plan 指定外事项：JIT 常量传播约束的真实实现、平台 loader 接入、VM2、更多 runtime 策略接线。
+- 下一子任务建议：
+  - 等待 supervisor 指定下一轮；若继续字符串链路，可进入 loader/runtime state 对接或 JIT 常量传播约束的真实实现子任务。
+- 验证：
+  - `cd /workspace/vmp && cmake --build build -j`：通过。
+  - `cd /workspace/vmp && ctest --test-dir build --output-on-failure`：`37/37` 通过。
+  - `cd /workspace/vmp && cargo test --workspace`：通过。
+  - `cd /workspace/vmp && python3 tests/strings/vmp_string_protect_roundtrip.py build/tools/vmp-string-protect build/tools/vmp-vm1-asm build/tools/vmp-vm1-run`：输出 `vmp-string-protect round-trip OK`。
+  - `/tmp` clean replay：复制到 `/tmp/vmp-sub06-replay`（排除 `build*` / `target` / log），随后 `cmake -S . -B build && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`：通过，输出 `TMP_REPLAY_OK`。

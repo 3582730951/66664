@@ -1,3 +1,3 @@
-pub fn strings_status() -> &'static str {
-    "NOT_IMPLEMENTED"
+pub fn status() -> &'static str {
+    "rust_strings_placeholder"
 }

@@ -146,11 +146,13 @@ void execute_return(Vm1Context& context, bool explicit_domain_ret, bool& halted)
   const auto ret_int = context.vr[0];
   const auto ret_float = context.vfr[0];
   if (context.frames_.empty()) {
+    context.clear_frame_transient_strings();
     halted = true;
     context.vr[0] = ret_int;
     context.vfr[0] = ret_float;
     return;
   }
+  context.clear_frame_transient_strings();
   const auto frame = context.frames_.back();
   context.frames_.pop_back();
   context.vr = frame.vr;
@@ -182,6 +184,7 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
   if (context.pc > context.module->code.size()) {
     throw VmException(VmTrapCode::invalid_module, context.pc, "vm1: entry pc out of range");
   }
+  try {
   bool halted = false;
   while (!halted) {
     bool control_flow_changed = false;
@@ -463,8 +466,16 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
       case Opcode::load_transient_string: {
         const auto dst = context.module->code.at(cursor++);
         const auto id = read_u32(context.module->code, cursor);
+        // JIT hook: future JIT paths must not constant-propagate decrypted transient bytes into caches.
         context.vr.at(dst) = context.materialize_transient_string(id);
         set_logic_flags(context, context.vr.at(dst));
+        break;
+      }
+      case Opcode::release_transient_string: {
+        const auto src = context.module->code.at(cursor++);
+        context.release_transient_string(context.vr.at(src));
+        context.vr.at(src) = 0;
+        set_logic_flags(context, 0);
         break;
       }
       default:
@@ -476,6 +487,10 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
     }
   }
   return ExecutionResult{context.vr[0], context.vfr[0]};
+  } catch (...) {
+    context.clear_all_transient_strings();
+    throw;
+  }
 }
 
 }  // namespace vmp::runtime::vm1

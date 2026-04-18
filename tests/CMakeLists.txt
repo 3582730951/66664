@@ -118,6 +118,33 @@ add_test(NAME bindings_cpp_vmp_clang_passthrough_exists
 set_tests_properties(bindings_cpp_vmp_clang_passthrough_exists PROPERTIES DEPENDS bindings_cpp_vmp_clang_passthrough PASS_REGULAR_EXPRESSION "exists:")
 
 
+
+# runtime/strings tests
+add_executable(strings_crypto_vectors ${CMAKE_CURRENT_SOURCE_DIR}/strings/crypto_vectors.cpp)
+target_link_libraries(strings_crypto_vectors PRIVATE vmp_runtime_strings vmp_policy)
+set_target_properties(strings_crypto_vectors PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(strings_transient_view_zeroization ${CMAKE_CURRENT_SOURCE_DIR}/strings/transient_view_zeroization.cpp)
+target_link_libraries(strings_transient_view_zeroization PRIVATE vmp_runtime_strings vmp_policy)
+set_target_properties(strings_transient_view_zeroization PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(strings_concurrency_8_threads ${CMAKE_CURRENT_SOURCE_DIR}/strings/concurrency_8_threads.cpp)
+target_link_libraries(strings_concurrency_8_threads PRIVATE vmp_runtime_strings vmp_policy)
+set_target_properties(strings_concurrency_8_threads PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(strings_pool_corruption_detected ${CMAKE_CURRENT_SOURCE_DIR}/strings/pool_corruption_detected.cpp)
+target_link_libraries(strings_pool_corruption_detected PRIVATE vmp_runtime_strings vmp_runtime_audit vmp_policy)
+set_target_properties(strings_pool_corruption_detected PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_test(NAME strings_crypto_vectors COMMAND $<TARGET_FILE:strings_crypto_vectors>)
+set_tests_properties(strings_crypto_vectors PROPERTIES PASS_REGULAR_EXPRESSION "crypto_vectors OK")
+add_test(NAME strings_transient_view_zeroization COMMAND $<TARGET_FILE:strings_transient_view_zeroization>)
+set_tests_properties(strings_transient_view_zeroization PROPERTIES PASS_REGULAR_EXPRESSION "transient_view_zeroization OK")
+add_test(NAME strings_concurrency_8_threads COMMAND $<TARGET_FILE:strings_concurrency_8_threads>)
+set_tests_properties(strings_concurrency_8_threads PROPERTIES PASS_REGULAR_EXPRESSION "concurrency_8_threads OK")
+add_test(NAME strings_pool_corruption_detected COMMAND $<TARGET_FILE:strings_pool_corruption_detected>)
+set_tests_properties(strings_pool_corruption_detected PROPERTIES PASS_REGULAR_EXPRESSION "pool_corruption_detected OK")
+
 # runtime/vm1 tests
 add_executable(vm1_asm_round_trip ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1/vm1_asm_round_trip.cpp)
 target_link_libraries(vm1_asm_round_trip PRIVATE vmp_runtime_vm1 vmp_runtime_audit)
@@ -171,6 +198,22 @@ set_tests_properties(vm1_bench PROPERTIES PASS_REGULAR_EXPRESSION "vm1_bench nop
 add_test(NAME vmp_vm1_asm_fib20
   COMMAND $<TARGET_FILE:vmp-vm1-asm> ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1/fixtures/fib20.vm1s ${CMAKE_BINARY_DIR}/tests/fib20.vm1)
 set_tests_properties(vmp_vm1_asm_fib20 PROPERTIES PASS_REGULAR_EXPRESSION "assembled")
+
+
+add_executable(vm1_load_transient_string_integration ${CMAKE_CURRENT_SOURCE_DIR}/runtime_vm1/strings_integration/vm1_load_transient_string_integration.cpp)
+target_link_libraries(vm1_load_transient_string_integration PRIVATE vmp_runtime_vm1 vmp_runtime_strings vmp_runtime_audit)
+set_target_properties(vm1_load_transient_string_integration PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_test(NAME vm1_load_transient_string_integration COMMAND $<TARGET_FILE:vm1_load_transient_string_integration>)
+set_tests_properties(vm1_load_transient_string_integration PROPERTIES PASS_REGULAR_EXPRESSION "vm1_load_transient_string_integration OK")
+
+add_test(NAME vmp_string_protect_round_trip
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/strings/vmp_string_protect_roundtrip.py $<TARGET_FILE:vmp-string-protect> $<TARGET_FILE:vmp-vm1-asm> $<TARGET_FILE:vmp-vm1-run>)
+set_tests_properties(vmp_string_protect_round_trip PROPERTIES PASS_REGULAR_EXPRESSION "vmp-string-protect round-trip OK")
+
+add_test(NAME vmp_protect_strings
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/strings/vmp_protect_strings.py $<TARGET_FILE:vmp-protect>)
+set_tests_properties(vmp_protect_strings PROPERTIES PASS_REGULAR_EXPRESSION "vmp-protect strings OK")
 
 add_test(NAME vmp_vm1_run_fib20
   COMMAND $<TARGET_FILE:vmp-vm1-run> ${CMAKE_BINARY_DIR}/tests/fib20.vm1 20)

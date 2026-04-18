@@ -1,9 +1,5 @@
 #pragma once
 
-namespace vmp::runtime::strings {
-
-struct Facade {
-  const char* status() const noexcept;
-};
-
-}  // namespace vmp::runtime::strings
+#include <vmp/runtime/strings/cipher.h>
+#include <vmp/runtime/strings/keyctx.h>
+#include <vmp/runtime/strings/use.h>

@@ -356,6 +356,9 @@ Opcode parse_opcode(const std::string& op) {
       {"domain_call", Opcode::domain_call},
       {"domain_ret", Opcode::domain_ret},
       {"load_transient_string", Opcode::load_transient_string},
+      {"load_tstr", Opcode::load_transient_string},
+      {"release_transient_string", Opcode::release_transient_string},
+      {"release_tstr", Opcode::release_transient_string},
   };
   const auto it = table.find(op);
   if (it == table.end()) {
@@ -377,6 +380,8 @@ std::size_t instruction_size(Opcode opcode) {
     case Opcode::call:
     case Opcode::load_transient_string:
       return 6;
+    case Opcode::release_transient_string:
+      return 2;
     case Opcode::mov:
     case Opcode::neg:
     case Opcode::bit_not:
@@ -495,6 +500,16 @@ AssemblyProgram parse_assembly(std::string_view source) {
   return program;
 }
 
+std::uint32_t parse_string_id_token(const std::string& token) {
+  if (token.rfind("&sid", 0) == 0) {
+    return static_cast<std::uint32_t>(parse_u64_value(token.substr(4)));
+  }
+  if (token.rfind("sid", 0) == 0) {
+    return static_cast<std::uint32_t>(parse_u64_value(token.substr(3)));
+  }
+  return static_cast<std::uint32_t>(parse_u64_value(token));
+}
+
 std::uint32_t resolve_target(const std::string& token, const std::map<std::string, std::uint32_t>& labels) {
   if (!token.empty() && token[0] == '@') {
     const auto it = labels.find(token.substr(1));
@@ -604,20 +619,77 @@ void Vm1Context::ensure_memory_range(std::uint64_t address, std::size_t width) c
 }
 
 std::uint64_t Vm1Context::materialize_transient_string(std::uint32_t id) {
-  if (module == nullptr || id >= module->const_pool.size() || module->const_pool[id].kind != ConstKind::transient_string) {
-    throw VmException(VmTrapCode::invalid_constant, pc, "vm1: transient string id out of range");
-  }
+  auto view = [this, id]() -> vmp::runtime::strings::TransientView {
+    if (string_pool) {
+      string_pool->set_audit_dispatcher(audit_dispatcher);
+      return string_pool->decrypt(id);
+    }
+    if (module == nullptr || id >= module->const_pool.size() || module->const_pool[id].kind != ConstKind::transient_string) {
+      throw VmException(VmTrapCode::invalid_constant, pc, "vm1: transient string id out of range");
+    }
+    return vmp::runtime::strings::TransientView(module->const_pool[id].bytes);
+  }();
   const auto handle = next_transient_handle_++;
-  transient_strings_[handle] = std::string(module->const_pool[id].bytes.begin(), module->const_pool[id].bytes.end());
+  transient_strings_[handle] = std::make_unique<vmp::runtime::strings::TransientView>(std::move(view));
+  register_transient_handle(handle);
   return handle;
 }
 
-std::string Vm1Context::transient_string(std::uint64_t handle) const {
+void Vm1Context::release_transient_string(std::uint64_t handle) {
   const auto it = transient_strings_.find(handle);
   if (it == transient_strings_.end()) {
     throw VmException(VmTrapCode::invalid_constant, pc, "vm1: transient string handle not found");
   }
-  return it->second;
+  remove_transient_handle_owner(handle);
+  transient_strings_.erase(it);
+}
+
+std::string Vm1Context::transient_string(std::uint64_t handle) const {
+  const auto it = transient_strings_.find(handle);
+  if (it == transient_strings_.end() || it->second == nullptr) {
+    throw VmException(VmTrapCode::invalid_constant, pc, "vm1: transient string handle not found");
+  }
+  return std::string(it->second->view());
+}
+
+std::size_t Vm1Context::active_transient_strings() const noexcept { return transient_strings_.size(); }
+
+void Vm1Context::register_transient_handle(std::uint64_t handle) {
+  if (frames_.empty()) {
+    root_transient_handles_.push_back(handle);
+  } else {
+    frames_.back().transient_handles.push_back(handle);
+  }
+}
+
+void Vm1Context::remove_transient_handle_owner(std::uint64_t handle) {
+  auto erase_from = [handle](std::vector<std::uint64_t>& handles) {
+    handles.erase(std::remove(handles.begin(), handles.end(), handle), handles.end());
+  };
+  erase_from(root_transient_handles_);
+  for (auto& frame : frames_) {
+    erase_from(frame.transient_handles);
+  }
+}
+
+void Vm1Context::clear_frame_transient_strings() {
+  std::vector<std::uint64_t> handles;
+  if (frames_.empty()) {
+    handles.swap(root_transient_handles_);
+  } else {
+    handles.swap(frames_.back().transient_handles);
+  }
+  for (auto handle : handles) {
+    transient_strings_.erase(handle);
+  }
+}
+
+void Vm1Context::clear_all_transient_strings() noexcept {
+  transient_strings_.clear();
+  root_transient_handles_.clear();
+  for (auto& frame : frames_) {
+    frame.transient_handles.clear();
+  }
 }
 
 Vm1Module Vm1Module::load_from_file(const std::string& path) {
@@ -814,7 +886,11 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       }
       case Opcode::load_transient_string: {
         module.code.push_back(parse_general_register(inst.operands.at(0)));
-        append_u32(module.code, static_cast<std::uint32_t>(parse_u64_value(inst.operands.at(1))));
+        append_u32(module.code, parse_string_id_token(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::release_transient_string: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
         break;
       }
     }
@@ -864,6 +940,7 @@ std::string opcode_name(Opcode opcode) {
     case Opcode::domain_call: return "domain_call";
     case Opcode::domain_ret: return "domain_ret";
     case Opcode::load_transient_string: return "load_transient_string";
+    case Opcode::release_transient_string: return "release_transient_string";
   }
   return "unknown";
 }
@@ -1014,7 +1091,12 @@ std::string disassemble_module(const Vm1Module& module) {
       }
       case Opcode::load_transient_string: {
         const auto reg = module.code[pc++];
-        out << " vr" << static_cast<unsigned>(reg) << ", " << read_u32_code(module.code, pc);
+        out << " vr" << static_cast<unsigned>(reg) << ", &sid" << read_u32_code(module.code, pc);
+        break;
+      }
+      case Opcode::release_transient_string: {
+        const auto reg = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(reg);
         break;
       }
     }

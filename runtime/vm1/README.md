@@ -36,7 +36,7 @@
 
 当前 `const_pool` 已实现：
 
-- `kind=1`: transient string
+- `kind=1`: transient string（旧 `.const string` 兼容路径；本轮新增 `StringPool` 外部加密池）
 
 ## ISA 列表
 
@@ -50,7 +50,9 @@
 - `ldi_u64 <vr>, <u64>`
 - `ldi_f64 <vfr>, <double>`
 - `mov <dst>, <src>`
-- `load_transient_string <vr>, <const_id>`
+- `load_transient_string <vr>, <string_id>`
+- `release_transient_string <vr>`
+- DSL alias: `load_tstr <vr>, &sid42` / `release_tstr <vr>`
 
 ### 算术 / 位运算
 - `add/sub/mul/div/mod <dst>, <lhs>, <rhs>`
@@ -125,6 +127,7 @@ base:
 ## audit 集成
 
 - `breakpoint` → 追加 `vm1_breakpoint`
+- `load_tstr` 通过关联 `StringPool` 进行瞬时解密；未显式 `release_tstr` 时在 return/exception unwind 自动擦除
 - `trap` → 追加 `vm1_trap`
 - `unknown opcode` → 追加 `vm1_unknown_opcode`
 - `stack overflow` → 追加 `vm1_stack_overflow`
@@ -134,4 +137,4 @@ base:
 ## CLI
 
 - 汇编：`build/tools/vmp-vm1-asm input.vm1s output.vm1`
-- 运行：`build/tools/vmp-vm1-run [--audit-path audit.log] module.vm1 [args...]`
+- 运行：`build/tools/vmp-vm1-run [--audit-path audit.log] [--string-pool pool.bin --string-idx pool.idx.json --key-env VMP_STRING_MASTER_KEY] [--native-print-string <id>] module.vm1 [args...]`

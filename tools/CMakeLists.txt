@@ -1,7 +1,8 @@
 add_executable(vmp-clang ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_clang.cpp)
 add_executable(vmp-clang++ ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_clangxx.cpp)
 vmp_add_placeholder_tool(vmp-link ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_link.cpp)
-vmp_add_placeholder_tool(vmp-protect ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_protect.cpp)
+add_executable(vmp-protect ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_protect.cpp)
+add_executable(vmp-string-protect ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_string_protect.cpp)
 
 foreach(target IN ITEMS vmp-clang vmp-clang++)
   target_link_libraries(${target} PRIVATE vmp_build_options)
@@ -22,12 +23,16 @@ foreach(target IN ITEMS vmp-clang vmp-clang++)
   endif()
 endforeach()
 
-target_link_libraries(vmp-protect PRIVATE vmp_policy vmp_runtime_audit)
+set_target_properties(vmp-protect PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+set_target_properties(vmp-string-protect PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+
+target_link_libraries(vmp-protect PRIVATE vmp_policy vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
+target_link_libraries(vmp-string-protect PRIVATE vmp_runtime_strings vmp_policy nlohmann_json::nlohmann_json)
 
 add_executable(vmp-vm1-asm ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm1_asm.cpp)
 target_link_libraries(vmp-vm1-asm PRIVATE vmp_runtime_vm1)
 set_target_properties(vmp-vm1-asm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 
 add_executable(vmp-vm1-run ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_vm1_run.cpp)
-target_link_libraries(vmp-vm1-run PRIVATE vmp_runtime_vm1 vmp_runtime_audit)
+target_link_libraries(vmp-vm1-run PRIVATE vmp_runtime_vm1 vmp_runtime_audit vmp_runtime_strings nlohmann_json::nlohmann_json)
 set_target_properties(vmp-vm1-run PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)

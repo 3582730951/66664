@@ -53,6 +53,7 @@ enum class Opcode : std::uint8_t {
   domain_call = 0x39,
   domain_ret = 0x3A,
   load_transient_string = 0x40,
+  release_transient_string = 0x41,
 };
 
 enum class ConstKind : std::uint8_t {

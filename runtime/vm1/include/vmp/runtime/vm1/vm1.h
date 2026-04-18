@@ -12,6 +12,7 @@
 
 #include <vmp/runtime/audit/reaction.h>
 #include <vmp/runtime/bridge/bridge.h>
+#include <vmp/runtime/strings/cipher.h>
 #include <vmp/runtime/vm1/isa.h>
 
 namespace vmp::runtime::vm1 {
@@ -38,6 +39,8 @@ enum class VmTrapCode {
   invalid_constant,
   invalid_register,
   bridge_error,
+  string_pool_error,
+  plaintext_budget_violation,
 };
 
 class VmException : public std::runtime_error {
@@ -90,6 +93,7 @@ class Vm1Context {
   KeyContext key_context{};
   vmp::runtime::bridge::BridgeRegistry* bridge_registry = nullptr;
   vmp::runtime::audit::ReactionDispatcher* audit_dispatcher = nullptr;
+  std::shared_ptr<vmp::runtime::strings::StringPool> string_pool;
   int max_bridge_depth = 64;
 
   std::size_t stack_size() const noexcept;
@@ -103,7 +107,9 @@ class Vm1Context {
   void write_memory(std::uint64_t address, T value);
 
   std::uint64_t materialize_transient_string(std::uint32_t id);
+  void release_transient_string(std::uint64_t handle);
   std::string transient_string(std::uint64_t handle) const;
+  std::size_t active_transient_strings() const noexcept;
 
  public:
   friend class Vm1Interpreter;
@@ -116,14 +122,21 @@ class Vm1Context {
     std::uint64_t caller_sp = 0;
     std::uint64_t caller_stack_top = 0;
     std::uint8_t arg_count = 0;
+    std::vector<std::uint64_t> transient_handles;
   };
 
   void ensure_memory_range(std::uint64_t address, std::size_t width) const;
 
+  void register_transient_handle(std::uint64_t handle);
+  void remove_transient_handle_owner(std::uint64_t handle);
+  void clear_frame_transient_strings();
+  void clear_all_transient_strings() noexcept;
+
   std::vector<std::uint8_t> stack_;
   std::uint64_t stack_top_ = 0;
   std::vector<CallFrame> frames_;
-  std::unordered_map<std::uint64_t, std::string> transient_strings_;
+  std::vector<std::uint64_t> root_transient_handles_;
+  std::unordered_map<std::uint64_t, std::unique_ptr<vmp::runtime::strings::TransientView>> transient_strings_;
   std::uint64_t next_transient_handle_ = 1;
 };
 
