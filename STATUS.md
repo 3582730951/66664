@@ -322,3 +322,23 @@
   - `cd /workspace/vmp && cargo test --workspace`：通过。
   - `cd /workspace/vmp && ./build/tools/vmp-vm1-asm tests/runtime_vm1/fixtures/fib20.vm1s /tmp/fib20.vm1 && ./build/tools/vmp-vm1-run /tmp/fib20.vm1 20`：输出 `ret_int=6765 ret_float=0`。
   - `cd /tmp/vmp_ci_sim && ctest --test-dir build --output-on-failure && cargo test --workspace`：全部通过。
+
+### ci_fix_round_4
+- 本轮清单：
+  - 从版本控制中移除误提交的 `build/` 目录（`git rm -rf build`），清掉被跟踪的 `CMakeCache.txt`、`CMakeFiles/`、`CTestTestfile.cmake`、Ninja 产物和测试二进制。
+  - 扩充 `.gitignore`，同时覆盖 `build/` 与 `build-*/`，避免后续再次把默认构建目录提交进仓库。
+  - 复检 `git ls-files` 中的生成物模式：`(^|/)build/`、`CMakeCache`、`CMakeFiles`、`_deps/`；确认仓库索引内已无同类误提交产物。
+- 变更文件：
+  - `.gitignore`
+  - `STATUS.md`
+  - `build/` 下全部已跟踪生成物（删除出索引）
+- 验证：
+  - `cd /workspace/vmp && git ls-files | grep -E '(^|/)build/|CMakeCache|CMakeFiles|_deps/'`：无输出。
+  - `cd /workspace/vmp && rm -rf build && cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64`：通过，干净 configure 成功。
+  - `cd /workspace/vmp && cmake --build build -j && ctest --test-dir build --output-on-failure`：通过，`30/30` 测试通过。
+  - `cd /workspace/vmp && cargo test --workspace`：通过；Rust workspace 全绿。
+  - `rm -rf /tmp/vmp_ci_sim_clean && cp -a /workspace/vmp/. /tmp/vmp_ci_sim_clean/ && cd /tmp/vmp_ci_sim_clean && rm -rf build && cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64 && cmake --build build -j && ctest --test-dir build --output-on-failure && cargo test --workspace`：通过；clean copy 下 configure/build/test 全绿。
+- 未完成项：
+  - 本轮要求范围内无未完成项。
+- 下一子任务建议：
+  - 等待 supervisor 检查 CI；若仍有平台特定失败，再按失败 job 日志做定点修复。
