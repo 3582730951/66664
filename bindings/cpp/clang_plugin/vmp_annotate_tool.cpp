@@ -13,6 +13,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -86,6 +87,14 @@ std::string get_mangled_name(clang::ASTContext& context, const clang::NamedDecl&
   llvm::raw_string_ostream os(out);
   mangle_context->mangleName(global_decl, os);
   return os.str();
+}
+
+LanguageOrigin infer_language_from_file(const std::string& file) {
+  const std::string extension = std::filesystem::path(file).extension().string();
+  if (extension == ".c") {
+    return LanguageOrigin::c;
+  }
+  return LanguageOrigin::cpp;
 }
 
 std::string to_symbol_or_region(const std::string& mangled_name, const std::string& display_name) {
@@ -183,8 +192,8 @@ class CollectorVisitor : public clang::RecursiveASTVisitor<CollectorVisitor> {
   void update_common(const clang::NamedDecl& decl, CollectedDecl& out, bool vm_func, bool vm_string) {
     out.vm_func = out.vm_func || vm_func;
     out.vm_string = out.vm_string || vm_string;
-    out.language_origin = context_.getLangOpts().CPlusPlus ? LanguageOrigin::cpp : LanguageOrigin::c;
     const auto loc = to_source_location(source_manager_, decl.getLocation());
+    out.language_origin = infer_language_from_file(loc.file);
     if (out.location.line == 0 || (loc.line != 0 && loc.line < out.location.line)) {
       out.location = loc;
     }
@@ -198,7 +207,7 @@ class CollectorVisitor : public clang::RecursiveASTVisitor<CollectorVisitor> {
     out.display_name = "literal::" + loc.file + ":" + std::to_string(loc.line) + ":" + std::to_string(loc.column) +
                        "|" + quote_display(literal.getString().str());
     out.location = loc;
-    out.language_origin = context_.getLangOpts().CPlusPlus ? LanguageOrigin::cpp : LanguageOrigin::c;
+    out.language_origin = infer_language_from_file(loc.file);
     out.vm_string = true;
   }
 

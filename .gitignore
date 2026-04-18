@@ -19,3 +19,4 @@ passwd.txt
 vm_runtime_audit.log
 *.log
 .cargo/
+Cargo.lock

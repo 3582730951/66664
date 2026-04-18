@@ -9,6 +9,11 @@ set(VMP_POLICY_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/policy/examples")
 set(VMP_AUDIT_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/audit")
 set(VMP_BINDINGS_CPP_FIXTURES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/bindings_cpp")
 
+function(vmp_unset_ci_polluters test_name)
+  set_tests_properties(${test_name} PROPERTIES
+    ENVIRONMENT_MODIFICATION "CARGO_HOME=unset:;CARGO_BUILD_OFFLINE=unset:;VMP_DISABLE_CLANG_PLUGIN=unset:")
+endfunction()
+
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dummy_test.py ${CMAKE_CURRENT_BINARY_DIR}/dummy_test.py COPYONLY)
 
 add_executable(policy_cpp_test ${CMAKE_CURRENT_SOURCE_DIR}/policy/policy_cpp_test.cpp)
@@ -60,6 +65,7 @@ add_test(NAME cross_language_golden
 set_tests_properties(cross_language_golden PROPERTIES
   PASS_REGULAR_EXPRESSION "cross language audit golden OK"
   SKIP_REGULAR_EXPRESSION "cross language audit golden SKIPPED")
+vmp_unset_ci_polluters(cross_language_golden)
 
 add_test(NAME vmp_protect_detector_selftest
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/audit/assert_detector_selftest.py $<TARGET_FILE:vmp-protect> ${CMAKE_BINARY_DIR}/tests/detector_selftest.log)
@@ -80,6 +86,8 @@ add_test(NAME bindings_cpp_collect_c
 add_test(NAME bindings_cpp_collect_c_compare
   COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_COMPARE} ${CMAKE_BINARY_DIR}/tests/sample_c.policy.json ${VMP_CPP_EXPECTED_C})
 set_tests_properties(bindings_cpp_collect_c_compare PROPERTIES DEPENDS bindings_cpp_collect_c PASS_REGULAR_EXPRESSION "policy json equal")
+vmp_unset_ci_polluters(bindings_cpp_collect_c)
+vmp_unset_ci_polluters(bindings_cpp_collect_c_compare)
 
 add_test(NAME bindings_cpp_collect_cpp
   COMMAND $<TARGET_FILE:vmp-clang++> -std=c++17 -c ${VMP_CPP_SAMPLE_CPP} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_cpp.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_cpp.o)
@@ -91,12 +99,16 @@ else()
     COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_COMPARE} ${CMAKE_BINARY_DIR}/tests/sample_cpp.policy.json ${VMP_CPP_EXPECTED_CPP_FALLBACK})
 endif()
 set_tests_properties(bindings_cpp_collect_cpp_compare PROPERTIES DEPENDS bindings_cpp_collect_cpp PASS_REGULAR_EXPRESSION "policy json equal")
+vmp_unset_ci_polluters(bindings_cpp_collect_cpp)
+vmp_unset_ci_polluters(bindings_cpp_collect_cpp_compare)
 
 add_test(NAME bindings_cpp_collect_cpp_fallback
   COMMAND ${CMAKE_COMMAND} -E env VMP_DISABLE_CLANG_PLUGIN=1 $<TARGET_FILE:vmp-clang++> -std=c++17 -c ${VMP_CPP_SAMPLE_CPP} -I ${VMP_CPP_INCLUDE_DIR} --vmp-collect=${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.policy.json -o ${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.o)
 add_test(NAME bindings_cpp_collect_cpp_fallback_compare
   COMMAND ${Python3_EXECUTABLE} ${VMP_CPP_COMPARE} ${CMAKE_BINARY_DIR}/tests/sample_cpp_fallback.policy.json ${VMP_CPP_EXPECTED_CPP_FALLBACK})
 set_tests_properties(bindings_cpp_collect_cpp_fallback_compare PROPERTIES DEPENDS bindings_cpp_collect_cpp_fallback PASS_REGULAR_EXPRESSION "policy json equal")
+vmp_unset_ci_polluters(bindings_cpp_collect_cpp_fallback)
+vmp_unset_ci_polluters(bindings_cpp_collect_cpp_fallback_compare)
 
 add_test(NAME bindings_cpp_header_compile_clang_c
   COMMAND clang -c ${VMP_CPP_SAMPLE_C} -I ${VMP_CPP_INCLUDE_DIR} -o ${CMAKE_BINARY_DIR}/tests/header_clang_c.o)

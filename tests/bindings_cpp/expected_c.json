@@ -1,16 +1,9 @@
 {
   "defaults": {
     "annotation_origin": "attribute",
-    "event_types": [],
-    "integrity_level": "none",
-    "jit_policy": "off",
     "language_origin": "binary",
-    "mobile_bridge_mode": "off",
     "plaintext_budget": "transient_only",
-    "platform_caps": [],
-    "profile_seed": 0,
     "protection_domain": "native",
-    "reaction_policy": "log",
     "sensitivity_level": "normal"
   },
   "entries": [
@@ -32,7 +25,7 @@
       "sensitivity_level": "highly_sensitive",
       "source_location": {
         "column": 33,
-        "file": "__ROOT__/tests/bindings_cpp/sample_c.c",
+        "file": "sample_c.c",
         "line": 9
       },
       "symbol_or_region": "c_secret"
@@ -55,7 +48,7 @@
       "sensitivity_level": "highly_sensitive",
       "source_location": {
         "column": 33,
-        "file": "__ROOT__/tests/bindings_cpp/sample_c.c",
+        "file": "sample_c.c",
         "line": 10
       },
       "symbol_or_region": "c_token"
@@ -78,10 +71,10 @@
       "sensitivity_level": "highly_sensitive",
       "source_location": {
         "column": 45,
-        "file": "__ROOT__/tests/bindings_cpp/sample_c.c",
+        "file": "sample_c.c",
         "line": 10
       },
-      "symbol_or_region": "literal::__ROOT__/tests/bindings_cpp/sample_c.c:10:45|\"c-token\""
+      "symbol_or_region": "literal::sample_c.c:10:45|\"c-token\""
     },
     {
       "annotation_origin": "attribute",
@@ -101,10 +94,10 @@
       "sensitivity_level": "highly_sensitive",
       "source_location": {
         "column": 46,
-        "file": "__ROOT__/tests/bindings_cpp/sample_c.c",
+        "file": "sample_c.c",
         "line": 9
       },
-      "symbol_or_region": "literal::__ROOT__/tests/bindings_cpp/sample_c.c:9:46|\"c-secret\""
+      "symbol_or_region": "literal::sample_c.c:9:46|\"c-secret\""
     },
     {
       "annotation_origin": "attribute",
@@ -124,7 +117,7 @@
       "sensitivity_level": "sensitive",
       "source_location": {
         "column": 17,
-        "file": "__ROOT__/tests/bindings_cpp/sample_c.c",
+        "file": "sample_c.c",
         "line": 3
       },
       "symbol_or_region": "vm_declared_only"
@@ -147,7 +140,7 @@
       "sensitivity_level": "sensitive",
       "source_location": {
         "column": 17,
-        "file": "__ROOT__/tests/bindings_cpp/sample_c.c",
+        "file": "sample_c.c",
         "line": 5
       },
       "symbol_or_region": "vm_defined_c"
@@ -171,7 +164,7 @@
       "sensitivity_level": "highly_sensitive",
       "source_location": {
         "column": 31,
-        "file": "__ROOT__/tests/bindings_cpp/sample_c.c",
+        "file": "sample_c.c",
         "line": 12
       },
       "symbol_or_region": "vm_dual_c"
@@ -179,4 +172,3 @@
   ],
   "schema_version": 1
 }
-

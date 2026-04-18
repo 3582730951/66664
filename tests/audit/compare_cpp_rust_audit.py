@@ -24,13 +24,18 @@ def main() -> int:
         print("cross language audit golden SKIPPED: cargo unavailable")
         return 0
 
+    cargo_env = os.environ.copy()
+    cargo_env.pop("CARGO_HOME", None)
+    cargo_env.pop("CARGO_BUILD_OFFLINE", None)
+
     cpp = subprocess.check_output([str(cpp_bin), str(fixture)], text=True)
     subprocess.run(
         [cargo, "build", "-q", "-p", "rust_audit", "--example", "format_record"],
         cwd=repo_root,
+        env=cargo_env,
         check=True,
     )
-    rust = subprocess.check_output([str(example_path(repo_root, "format_record")), str(fixture)], cwd=repo_root, text=True)
+    rust = subprocess.check_output([str(example_path(repo_root, "format_record")), str(fixture)], cwd=repo_root, text=True, env=cargo_env)
     if cpp != rust:
         print("cpp:", cpp)
         print("rust:", rust)
