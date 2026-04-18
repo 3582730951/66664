@@ -21,6 +21,14 @@ namespace {
 using json = nlohmann::json;
 namespace audit = vmp::runtime::audit;
 
+std::filesystem::path default_fixtures_dir() {
+  return std::filesystem::path(VMP_AUDIT_FIXTURES_DEFAULT_DIR);
+}
+
+std::filesystem::path fixture_path(const std::string& name) {
+  return default_fixtures_dir() / name;
+}
+
 void require(bool condition, const std::string& message) {
   if (!condition) {
     throw std::runtime_error(message);
@@ -82,8 +90,8 @@ audit::AnalysisEventRecord event_from_json(const json& data) {
 }
 
 void test_line_format_exact() {
-  const auto record = event_from_json(read_json("/workspace/vmp/tests/audit/golden_record.json"));
-  const auto expected = slurp("/workspace/vmp/tests/audit/golden_line.txt");
+  const auto record = event_from_json(read_json(fixture_path("golden_record.json")));
+  const auto expected = slurp(fixture_path("golden_line.txt"));
   require(audit::format_line(record) + "\n" == expected, "formatted line mismatch");
 }
 

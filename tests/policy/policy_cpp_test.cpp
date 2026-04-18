@@ -1,4 +1,6 @@
 #include <algorithm>
+#include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -15,12 +17,30 @@ using vmp::policy::JitPolicy;
 using vmp::policy::LanguageOrigin;
 using vmp::policy::MobileBridgeMode;
 using vmp::policy::PlaintextBudget;
+using vmp::policy::PlatformCaps;
 using vmp::policy::PolicyEntry;
 using vmp::policy::PolicyIR;
 using vmp::policy::ProtectionDomain;
 using vmp::policy::ReactionPolicy;
 using vmp::policy::SensitivityLevel;
-using vmp::policy::PlatformCaps;
+
+std::filesystem::path default_fixtures_dir() {
+  return std::filesystem::path(VMP_POLICY_FIXTURES_DEFAULT_DIR);
+}
+
+std::filesystem::path resolve_fixtures_dir(int argc, char** argv) {
+  if (argc >= 2 && argv[1] != nullptr && argv[1][0] != '\0') {
+    return std::filesystem::path(argv[1]);
+  }
+  if (const char* env = std::getenv("VMP_POLICY_FIXTURES_DIR"); env != nullptr && env[0] != '\0') {
+    return std::filesystem::path(env);
+  }
+  return default_fixtures_dir();
+}
+
+std::filesystem::path fixture_path(const std::filesystem::path& fixtures_dir, const std::string& name) {
+  return fixtures_dir / name;
+}
 
 void require(bool condition, const std::string& message) {
   if (!condition) {
@@ -45,8 +65,8 @@ bool has_error_code(const std::vector<vmp::policy::ValidationError>& errors, con
   return false;
 }
 
-void test_round_trip() {
-  const auto original = vmp::policy::load_from_file("/workspace/vmp/tests/policy/examples/good.json");
+void test_round_trip(const std::filesystem::path& fixtures_dir) {
+  const auto original = vmp::policy::load_from_file(fixture_path(fixtures_dir, "good.json").string());
   const auto text = vmp::policy::save_to_string(original);
   const auto round_trip = vmp::policy::load_from_string(text);
   require(original == round_trip, "round-trip serialization mismatch");
@@ -68,16 +88,16 @@ void test_combined_annotations() {
   require(entry.annotation_tags.size() == 2, "combined annotations must preserve both tags");
 }
 
-void test_fixture(const std::string& file, bool expect_ok, const std::string& expected_error_code = {}) {
+void test_fixture(const std::filesystem::path& file, bool expect_ok, const std::string& expected_error_code = {}) {
   try {
-    const auto policy = vmp::policy::load_from_file(file);
+    const auto policy = vmp::policy::load_from_file(file.string());
     const auto errors = vmp::policy::validate(policy);
     const bool has_errors = std::any_of(errors.begin(), errors.end(), [](const auto& error) { return error.is_error(); });
     if (expect_ok) {
-      require(!has_errors, "expected policy to validate: " + file);
+      require(!has_errors, "expected policy to validate: " + file.string());
     } else {
       require(has_error_code(errors, expected_error_code),
-              "expected validation error code '" + expected_error_code + "' for " + file);
+              "expected validation error code '" + expected_error_code + "' for " + file.string());
     }
   } catch (const std::exception&) {
     if (expect_ok) {
@@ -89,17 +109,15 @@ void test_fixture(const std::string& file, bool expect_ok, const std::string& ex
   }
 }
 
-void test_positive_and_negative_constraints() {
-  test_fixture("/workspace/vmp/tests/policy/examples/good.json", true);
-  test_fixture("/workspace/vmp/tests/policy/examples/good_ios_hot_only.json", true);
-  test_fixture("/workspace/vmp/tests/policy/examples/bad_vm_func_native.json", false, "vm_func_native");
-  test_fixture("/workspace/vmp/tests/policy/examples/bad_vm_string_sensitivity.json", false,
-               "vm_string_sensitivity");
-  test_fixture("/workspace/vmp/tests/policy/examples/bad_vm_string_plaintext_budget.json", false);
-  test_fixture("/workspace/vmp/tests/policy/examples/bad_audit_event_type.json", false,
-               "audit_then_delayed_exit_event_type");
-  test_fixture("/workspace/vmp/tests/policy/examples/bad_ios_aggressive.json", false, "ios_jit_capability");
-  test_fixture("/workspace/vmp/tests/policy/examples/bad_vm2_integrity.json", false, "vm2_integrity_level");
+void test_positive_and_negative_constraints(const std::filesystem::path& fixtures_dir) {
+  test_fixture(fixture_path(fixtures_dir, "good.json"), true);
+  test_fixture(fixture_path(fixtures_dir, "good_ios_hot_only.json"), true);
+  test_fixture(fixture_path(fixtures_dir, "bad_vm_func_native.json"), false, "vm_func_native");
+  test_fixture(fixture_path(fixtures_dir, "bad_vm_string_sensitivity.json"), false, "vm_string_sensitivity");
+  test_fixture(fixture_path(fixtures_dir, "bad_vm_string_plaintext_budget.json"), false);
+  test_fixture(fixture_path(fixtures_dir, "bad_audit_event_type.json"), false, "audit_then_delayed_exit_event_type");
+  test_fixture(fixture_path(fixtures_dir, "bad_ios_aggressive.json"), false, "ios_jit_capability");
+  test_fixture(fixture_path(fixtures_dir, "bad_vm2_integrity.json"), false, "vm2_integrity_level");
 }
 
 void test_schema_contains_expected_fields() {
@@ -112,11 +130,12 @@ void test_schema_contains_expected_fields() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
-    test_round_trip();
+    const auto fixtures_dir = resolve_fixtures_dir(argc, argv);
+    test_round_trip(fixtures_dir);
     test_combined_annotations();
-    test_positive_and_negative_constraints();
+    test_positive_and_negative_constraints(fixtures_dir);
     test_schema_contains_expected_fields();
     std::cout << "policy_cpp_test OK\n";
     return 0;

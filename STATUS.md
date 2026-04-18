@@ -155,3 +155,33 @@
   - `cargo test --workspace`：全绿；`rust_audit` 5 个测试通过。
   - `./build-linux-x64/tools/vmp-protect --detector-selftest`：退出码 `0`，输出 `audit:ok exits_triggered=3`。
   - `./vm_runtime_audit.log`：共 `3` 行，且 `hw_breakpoint` / `integrity_mismatch` / `unknown` 各 `1` 行。
+
+### ci_fix_round_2
+- 改动清单：
+  - `tests/policy/policy_cpp_test.cpp`：移除 `/workspace/vmp/...` fixture 绝对路径；优先 `argv[1]`，其次 `VMP_POLICY_FIXTURES_DIR`，最后回退到 `CMAKE_CURRENT_SOURCE_DIR` 注入的默认目录。
+  - `tests/policy/policy_cpp_summary.cpp`：支持通过相对文件名 + `VMP_POLICY_FIXTURES_DIR`/默认目录解析 policy fixture，不再依赖固定工作路径。
+  - `tests/CMakeLists.txt`：在测试目录内 `find_package(Python3 REQUIRED COMPONENTS Interpreter)`；所有 ctest 中的 Python 脚本统一改为 `${Python3_EXECUTABLE}`；为 `policy_cpp_test` 注入 `VMP_POLICY_FIXTURES_DIR=${CMAKE_SOURCE_DIR}/tests/policy/examples`；为 policy/audit C++ helper 注入默认 fixture 目录宏。
+  - `tests/audit/audit_cpp_test.cpp`、`tests/audit/compare_cpp_rust_audit.py`：移除 `/workspace/vmp` 绝对路径，改为默认 fixture 目录或由脚本位置推导 repo root。
+  - `runtime/audit/rust_audit/tests/format_tests.rs`、`bindings/rust/vmp-policy/tests/cross_check.rs`：cargo 测试改为从 `CARGO_MANIFEST_DIR` 推导 repo root / fixture 路径，并自动搜索 repo 内现有 `build*` 目录下的 `audit_cpp_format` / `policy_cpp_summary` helper（也支持显式环境变量覆盖）。
+  - `.gitignore`：新增 `vm_runtime_audit.log`、`*.log`、`.cargo/registry/`。
+  - Git tree 清理：`git rm --cached vm_runtime_audit.log`，将误提交生成物移出版本控制。
+- 变更文件：
+  - `.gitignore`
+  - `bindings/rust/vmp-policy/tests/cross_check.rs`
+  - `runtime/audit/rust_audit/tests/format_tests.rs`
+  - `tests/CMakeLists.txt`
+  - `tests/audit/audit_cpp_test.cpp`
+  - `tests/audit/compare_cpp_rust_audit.py`
+  - `tests/policy/policy_cpp_summary.cpp`
+  - `tests/policy/policy_cpp_test.cpp`
+  - `vm_runtime_audit.log`（git index 移除）
+- 验证结果（仓库原路径 `/workspace/vmp`）：
+  - `cmake -S . -B build-ci-fix -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64`：通过。
+  - `cmake --build build-ci-fix -j`：通过。
+  - `ctest --test-dir build-ci-fix --output-on-failure`：`9/9` 通过。
+  - `cargo test --workspace`：通过；`rust_audit` 5 个测试、`vmp-policy` 2 个单元测试、`cross_check` 2 个测试全部通过。
+- 验证结果（CI 模拟路径 `/tmp/vmp_ci_sim`）：
+  - `cp -r /workspace/vmp /tmp/vmp_ci_sim && cd /tmp/vmp_ci_sim && rm -rf build-*` 后重跑 `cmake + build + ctest`：全部通过。
+  - `ctest --test-dir build-ci-fix --output-on-failure`：`9/9` 通过，证明测试不依赖 `/workspace/vmp` 绝对路径。
+- 未完成项：无（本轮要求范围内）。
+- 下一子任务建议：等待 supervisor 指定下一轮 CI/跨平台修复项。

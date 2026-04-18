@@ -1,6 +1,49 @@
 use rust_audit::{format_line, AnalysisEventRecord, AuditWriter, ReactionDispatcher, ReactionPolicy};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap()
+}
+
+fn audit_fixture(name: &str) -> PathBuf {
+    repo_root().join("tests").join("audit").join(name)
+}
+
+fn find_cpp_helper(name: &str) -> PathBuf {
+    if let Ok(path) = std::env::var(name) {
+        let candidate = PathBuf::from(path);
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+
+    let exe_name = format!("audit_cpp_format{}", std::env::consts::EXE_SUFFIX);
+    let root = repo_root();
+    let mut candidates = Vec::new();
+    for entry in std::fs::read_dir(&root).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+        if path.is_dir() {
+            let file_name = match path.file_name().and_then(|s| s.to_str()) {
+                Some(file_name) => file_name,
+                None => continue,
+            };
+            if file_name.starts_with("build") {
+                candidates.push(path.join("tests").join(&exe_name));
+            }
+        }
+    }
+    candidates.sort();
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| panic!("failed to locate {} in repo build directories", exe_name))
+}
 
 fn fixture_record() -> AnalysisEventRecord {
     AnalysisEventRecord {
@@ -21,7 +64,7 @@ fn fixture_record() -> AnalysisEventRecord {
 
 #[test]
 fn line_format_exact_rust() {
-    let expected = std::fs::read_to_string("/workspace/vmp/tests/audit/golden_line.txt").unwrap();
+    let expected = std::fs::read_to_string(audit_fixture("golden_line.txt")).unwrap();
     assert_eq!(format!("{}\n", format_line(&fixture_record())), expected);
 }
 
@@ -120,15 +163,24 @@ fn reaction_audit_then_delayed_exit_rust() {
 
 #[test]
 fn cross_language_golden() {
-    let fixture = "/workspace/vmp/tests/audit/golden_record.json";
+    let fixture = audit_fixture("golden_record.json");
     let rust_output = std::process::Command::new("cargo")
-        .args(["run", "-q", "-p", "rust_audit", "--example", "format_record", "--", fixture])
-        .current_dir("/workspace/vmp")
+        .args([
+            "run",
+            "-q",
+            "-p",
+            "rust_audit",
+            "--example",
+            "format_record",
+            "--",
+            fixture.to_str().unwrap(),
+        ])
+        .current_dir(repo_root())
         .output()
         .unwrap();
     assert!(rust_output.status.success());
-    let cpp_output = std::process::Command::new("/workspace/vmp/build-linux-x64/tests/audit_cpp_format")
-        .arg(fixture)
+    let cpp_output = std::process::Command::new(find_cpp_helper("VMP_AUDIT_CPP_FORMAT_BIN"))
+        .arg(&fixture)
         .output()
         .unwrap();
     assert!(cpp_output.status.success());
