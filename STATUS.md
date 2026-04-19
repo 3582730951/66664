@@ -1,5 +1,40 @@
 # STATUS
 
+## 本轮清单（Subtask 18: CI round 6 - 三个平台编译修复）
+- 修复 Windows/MSVC 编译失败：`runtime/audit/src/reaction.cpp` 删除 GNU `__attribute__((weak))` 用法，保留单一定义的 `runtime_state_bridge(...)` 默认 `false` 桥接体；同时移除 `runtime/state/src/state_machine.cpp` 中重复定义，消除 GNU weak 依赖与多定义风险。
+- 修复 iOS/AppleClang 编译失败：`runtime/jit/src/jit.cpp` 与 `runtime/jit/src/vm2_jit.cpp` 引入 `TargetConditionals.h` 和 `VMP_JIT_C_BACKEND_DISABLED`；iOS 目标上仅禁用 C backend shell-out 路径，在运行时抛出 `std::runtime_error("vmp jit c-backend unavailable on iOS")`，保留其余类/符号参与链接。
+- 修复 macOS/Windows host 缺失 `<elf.h>`：新增 `backends/rewriter/src/internal/elf_types.h`，仅 vendor 当前代码实际引用的 ELF64 类型/常量；`backends/rewriter/src/formats/elf.cpp` 在 Darwin/Windows 上切换到 vendored header，在 Linux 继续使用系统 `<elf.h>`。
+- 在 `elf.cpp` 与 vendored header 中加入 `static_assert(sizeof/offsetof(...))`，锁定 `Elf64_Ehdr` / `Elf64_Phdr` / `Elf64_Shdr` / `Elf64_Sym` 布局，避免跨平台宿主编译时结构漂移。
+
+## 本轮变更文件（相对路径）
+- `STATUS.md`
+- `runtime/audit/src/reaction.cpp`
+- `runtime/state/src/state_machine.cpp`
+- `runtime/jit/src/jit.cpp`
+- `runtime/jit/src/vm2_jit.cpp`
+- `backends/rewriter/src/formats/elf.cpp`
+- `backends/rewriter/src/internal/elf_types.h`
+
+## 本轮验证
+1. `cmake --build build -j`
+   - 结果：通过。
+2. `ctest --test-dir build --output-on-failure`
+   - 结果：`124/124` 通过；`0` failed；保留既有 `2` 个 skipped（`rewriter_pe_roundtrip`、`final_matrix_17_5_platform_matrix`）。
+3. `cargo test --workspace`
+   - 结果：通过；workspace Rust 单元/集成/doc tests 全绿。
+4. `/tmp` clean copy rebuild
+   - 命令：在 `/tmp/vmp_subtask18_clean2` 重新 `cmake -S . -B build -G Ninja && cmake --build build -j`。
+   - 结果：通过。
+5. 额外检查
+   - `rg -n "runtime_state_bridge\s*\(" runtime` 仅剩 `runtime/audit/src/reaction.cpp` 中的单一定义与调用。
+   - 触及文件中无 `NOT_IMPLEMENTED`。
+
+## 未完成项
+- 本轮仅关闭指定的三处跨平台 compile failure；后续 CI 若出现平台运行时/测试失败，需在后续轮次继续处理。
+
+## 下一子任务建议
+- 等待 supervisor 基于新一轮 GitHub Actions 结果指定下一组 CI / 平台兼容性修复项。
+
 ## 历史轮次：仓库骨架
 - 完成 `/workspace/vmp/` 仓库骨架与 plan §2 六层、§3 对外接口、§10 平台/架构分层的目录布局。
 - 完成顶层 CMake 构建骨架，提供 `VMP_WITH_JIT`、`VMP_WITH_VM2`、`VMP_PLATFORM`、`VMP_ARCH` 选项。

@@ -478,25 +478,3 @@ const char* Facade::status() const noexcept { return "runtime_state_ready"; }
 
 }  // namespace vmp::runtime::state
 
-namespace vmp::runtime::audit {
-bool runtime_state_bridge(const AnalysisEventRecord& record, ReactionPolicy policy) noexcept {
-  vmp::runtime::state::RuntimeEventPayload payload;
-  payload.name = record.event_type;
-  payload.note = record.context_note;
-  payload.program_counter = record.program_counter;
-  auto kind = vmp::runtime::state::RuntimeEventKind::audit_event;
-  switch (policy) {
-    case ReactionPolicy::audit_then_delayed_exit: kind = vmp::runtime::state::RuntimeEventKind::hw_breakpoint; break;
-    case ReactionPolicy::degrade: kind = vmp::runtime::state::RuntimeEventKind::env_anomaly; break;
-    case ReactionPolicy::decoy_terminate: kind = vmp::runtime::state::RuntimeEventKind::shutdown_requested; break;
-    case ReactionPolicy::log:
-    case ReactionPolicy::audit_only: kind = vmp::runtime::state::RuntimeEventKind::audit_event; break;
-  }
-  auto& state = vmp::runtime::state::RuntimeState::instance();
-  if (!state.initialized()) {
-    return false;
-  }
-  state.observe(kind, payload);
-  return true;
-}
-}  // namespace vmp::runtime::audit

@@ -17,6 +17,14 @@
 #include <unordered_set>
 #include <vector>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__APPLE__) && (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+#define VMP_JIT_C_BACKEND_DISABLED 1
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -636,7 +644,13 @@ struct Vm2Jit::Impl {
                         const Vm2Context& context,
                         std::uint32_t entry_pc,
                         const std::vector<std::uint32_t>& blocks) {
-#if defined(_WIN32)
+#if defined(VMP_JIT_C_BACKEND_DISABLED)
+    (void)module;
+    (void)context;
+    (void)entry_pc;
+    (void)blocks;
+    throw std::runtime_error("vmp jit c-backend unavailable on iOS");
+#elif defined(_WIN32)
     (void)module;
     (void)context;
     (void)entry_pc;

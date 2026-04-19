@@ -3,9 +3,9 @@
 #include <cstdlib>
 #include <thread>
 
+
 namespace vmp::runtime::audit {
 
-bool runtime_state_bridge(const AnalysisEventRecord&, ReactionPolicy) noexcept __attribute__((weak));
 bool runtime_state_bridge(const AnalysisEventRecord&, ReactionPolicy) noexcept { return false; }
 
 namespace {

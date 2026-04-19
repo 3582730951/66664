@@ -14,6 +14,14 @@
 #include <system_error>
 #include <unordered_set>
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__APPLE__) && (defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE)
+#define VMP_JIT_C_BACKEND_DISABLED 1
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #else
@@ -624,7 +632,9 @@ struct Vm1Jit::Impl {
   }
 
   Entry compile_c_entry(const Vm1Module& module, std::uint32_t start_pc, const std::vector<std::uint32_t>& pcs, bool trace) {
-#if defined(_WIN32)
+#if defined(VMP_JIT_C_BACKEND_DISABLED)
+    throw std::runtime_error("vmp jit c-backend unavailable on iOS");
+#elif defined(_WIN32)
     throw std::runtime_error("jit c backend unavailable on windows in this build");
 #else
     ensure_directory(cache_dir);

@@ -1,4 +1,10 @@
+#if defined(__APPLE__) || defined(_WIN32)
+#include "../internal/elf_types.h"
+#else
 #include <elf.h>
+#endif
+
+#include <cstddef>
 
 #include <map>
 #include <set>
@@ -14,6 +20,15 @@
 
 namespace vmp::backend::rewriter::formats::elf {
 namespace {
+static_assert(sizeof(Elf64_Ehdr) == 64, "Elf64_Ehdr layout mismatch");
+static_assert(offsetof(Elf64_Ehdr, e_phoff) == 32, "Elf64_Ehdr::e_phoff offset mismatch");
+static_assert(offsetof(Elf64_Ehdr, e_shoff) == 40, "Elf64_Ehdr::e_shoff offset mismatch");
+static_assert(sizeof(Elf64_Phdr) == 56, "Elf64_Phdr layout mismatch");
+static_assert(offsetof(Elf64_Phdr, p_offset) == 8, "Elf64_Phdr::p_offset offset mismatch");
+static_assert(sizeof(Elf64_Shdr) == 64, "Elf64_Shdr layout mismatch");
+static_assert(offsetof(Elf64_Shdr, sh_offset) == 24, "Elf64_Shdr::sh_offset offset mismatch");
+static_assert(sizeof(Elf64_Sym) == 24, "Elf64_Sym layout mismatch");
+static_assert(offsetof(Elf64_Sym, st_value) == 8, "Elf64_Sym::st_value offset mismatch");
 using json = nlohmann::json;
 
 struct ParsedSection {
