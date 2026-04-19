@@ -1,6 +1,7 @@
 #include <vmp/runtime/vm1/vm1.h>
 
 #include <vmp/arch/common/label_resolver.h>
+#include <vmp/runtime/integrity/crc32.h>
 
 #include <algorithm>
 #include <atomic>
@@ -28,6 +29,66 @@ namespace {
 using ByteVector = std::vector<std::uint8_t>;
 namespace common = vmp::arch::common;
 std::atomic<std::uint64_t> g_next_vm1_module_id{1};
+
+void append_u32(ByteVector& out, std::uint32_t value);
+std::uint32_t read_u32(const ByteVector& bytes, std::size_t& offset);
+
+constexpr std::size_t kVm1HeaderSize = 4u + 2u + 2u + 4u + 4u + 4u + 4u;
+
+std::string hex_u32(std::uint32_t value) {
+  std::ostringstream oss;
+  oss << "0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << value;
+  return oss.str();
+}
+
+void append_module_crc_mismatch_audit(const std::string& note) noexcept {
+  try {
+    vmp::runtime::audit::AuditWriter writer(vmp::runtime::audit::AuditWriter::default_path());
+    writer.append(vmp::runtime::audit::make_event("vm1_module_crc_mismatch", note, 0, "vm1"));
+    writer.flush();
+  } catch (...) {
+  }
+}
+
+ByteVector serialize_const_pool_section(const std::vector<ConstPoolEntry>& const_pool) {
+  ByteVector out;
+  for (const auto& entry : const_pool) {
+    out.push_back(static_cast<std::uint8_t>(entry.kind));
+    append_u32(out, static_cast<std::uint32_t>(entry.bytes.size()));
+    out.insert(out.end(), entry.bytes.begin(), entry.bytes.end());
+  }
+  return out;
+}
+
+std::size_t vm1_body_end_offset(const ByteVector& bytes, std::size_t code_size, std::uint32_t const_count) {
+  if (bytes.size() < kVm1HeaderSize) {
+    throw std::runtime_error("vm1: module too small");
+  }
+  std::size_t offset = kVm1HeaderSize;
+  if (offset + code_size > bytes.size()) {
+    throw std::runtime_error("vm1: truncated code");
+  }
+  offset += code_size;
+  for (std::uint32_t i = 0; i < const_count; ++i) {
+    if (offset >= bytes.size()) {
+      throw std::runtime_error("vm1: truncated const kind");
+    }
+    ++offset;
+    std::size_t payload_offset = offset;
+    const auto payload_size = read_u32(bytes, payload_offset);
+    if (payload_offset + payload_size > bytes.size()) {
+      throw std::runtime_error("vm1: truncated const payload");
+    }
+    offset = payload_offset + payload_size;
+  }
+  return offset;
+}
+
+std::uint32_t vm1_body_crc32(const ByteVector& bytes, std::size_t code_size, std::uint32_t const_count) {
+  const auto body_end = vm1_body_end_offset(bytes, code_size, const_count);
+  return vmp::runtime::integrity::crc32_compute(bytes.data() + kVm1HeaderSize,
+                                                body_end - kVm1HeaderSize);
+}
 
 
 std::string trim(std::string_view value) {
@@ -878,7 +939,7 @@ Vm1Module Vm1Module::load_from_file(const std::string& path) {
 }
 
 Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < 16) {
+  if (bytes.size() < kVm1HeaderSize) {
     throw std::runtime_error("vm1: module too small");
   }
   Vm1Module module;
@@ -891,8 +952,15 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   module.module_flags = read_u16(bytes, offset);
   module.entry_pc = read_u32(bytes, offset);
   const auto code_size = read_u32(bytes, offset);
+  const auto const_count = read_u32(bytes, offset);
+  module.crc32 = read_u32(bytes, offset);
   if (module.version != kVm1Version) {
     throw std::runtime_error("vm1: unsupported version");
+  }
+  const auto actual_crc32 = vm1_body_crc32(bytes, code_size, const_count);
+  if (actual_crc32 != module.crc32) {
+    append_module_crc_mismatch_audit("expected=" + hex_u32(module.crc32) + " actual=" + hex_u32(actual_crc32));
+    throw std::runtime_error("vm1: crc32 mismatch");
   }
   if (offset + code_size > bytes.size()) {
     throw std::runtime_error("vm1: truncated code");
@@ -900,7 +968,6 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   module.code.assign(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
                      bytes.begin() + static_cast<std::ptrdiff_t>(offset + code_size));
   offset += code_size;
-  const auto const_count = read_u32(bytes, offset);
   module.const_pool.resize(const_count);
   for (std::uint32_t i = 0; i < const_count; ++i) {
     if (offset >= bytes.size()) {
@@ -921,20 +988,43 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   return module;
 }
 
+std::uint32_t serialized_body_crc32(const std::vector<std::uint8_t>& bytes) {
+  if (bytes.size() < kVm1HeaderSize) {
+    throw std::runtime_error("vm1: module too small");
+  }
+  if (!std::equal(kVm1Magic.begin(), kVm1Magic.end(), bytes.begin())) {
+    throw std::runtime_error("vm1: bad magic");
+  }
+  std::size_t offset = 4;
+  const auto version = read_u16(bytes, offset);
+  (void)read_u16(bytes, offset);
+  (void)read_u32(bytes, offset);
+  const auto code_size = read_u32(bytes, offset);
+  const auto const_count = read_u32(bytes, offset);
+  (void)read_u32(bytes, offset);
+  if (version != kVm1Version) {
+    throw std::runtime_error("vm1: unsupported version");
+  }
+  return vm1_body_crc32(bytes, code_size, const_count);
+}
+
 std::vector<std::uint8_t> Vm1Module::serialize() const {
+  const auto const_section = serialize_const_pool_section(const_pool);
+  std::vector<std::uint8_t> body;
+  body.reserve(code.size() + const_section.size());
+  body.insert(body.end(), code.begin(), code.end());
+  body.insert(body.end(), const_section.begin(), const_section.end());
+
   std::vector<std::uint8_t> out;
+  out.reserve(kVm1HeaderSize + body.size());
   out.insert(out.end(), kVm1Magic.begin(), kVm1Magic.end());
-  append_u16(out, version);
+  append_u16(out, kVm1Version);
   append_u16(out, module_flags);
   append_u32(out, entry_pc);
   append_u32(out, static_cast<std::uint32_t>(code.size()));
-  out.insert(out.end(), code.begin(), code.end());
   append_u32(out, static_cast<std::uint32_t>(const_pool.size()));
-  for (const auto& entry : const_pool) {
-    out.push_back(static_cast<std::uint8_t>(entry.kind));
-    append_u32(out, static_cast<std::uint32_t>(entry.bytes.size()));
-    out.insert(out.end(), entry.bytes.begin(), entry.bytes.end());
-  }
+  append_u32(out, vmp::runtime::integrity::crc32_compute(body.data(), body.size()));
+  out.insert(out.end(), body.begin(), body.end());
   return out;
 }
 

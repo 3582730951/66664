@@ -7,7 +7,7 @@
 namespace vmp::runtime::vm2 {
 
 inline constexpr std::array<std::uint8_t, 4> kVm2Magic{{'V', 'M', 'P', '2'}};
-inline constexpr std::uint16_t kVm2Version = 2;
+inline constexpr std::uint16_t kVm2Version = 3;
 inline constexpr std::size_t kVm2GeneralRegisterCount = 32;
 inline constexpr std::size_t kVm2VectorRegisterCount = 16;
 inline constexpr std::size_t kVm2FloatRegisterCount = 8;

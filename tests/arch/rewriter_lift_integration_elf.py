@@ -147,6 +147,9 @@ target_include_directories(vmp_runtime_audit PUBLIC {source_root}/runtime/audit/
 add_library(vmp_policy STATIC {source_root}/policy/src/policy_ir.cpp)
 target_include_directories(vmp_policy PUBLIC {source_root}/policy/include)
 target_link_libraries(vmp_policy PUBLIC nlohmann_json::nlohmann_json)
+add_library(vmp_runtime_integrity STATIC
+  {source_root}/runtime/integrity/src/crc32.cpp)
+target_include_directories(vmp_runtime_integrity PUBLIC {source_root}/runtime/integrity/include)
 add_library(vmp_runtime_strings STATIC
   {source_root}/runtime/strings/src/strings.cpp
   {source_root}/runtime/strings/src/keyctx.cpp)
@@ -167,8 +170,8 @@ add_library(vmp_runtime_vm1 STATIC
   {source_root}/runtime/vm1/src/vm1.cpp
   {source_root}/runtime/vm1/src/interpreter.cpp
   {source_root}/runtime/vm1/src/bridge.cpp)
-target_include_directories(vmp_runtime_vm1 PUBLIC {source_root}/runtime/vm1/include {source_root}/runtime/strings/include {source_root}/runtime/audit/include {source_root}/policy/include {source_root}/arch/common/include)
-target_link_libraries(vmp_runtime_vm1 PUBLIC vmp_runtime_strings vmp_runtime_audit vmp_policy vmp_arch_common nlohmann_json::nlohmann_json)
+target_include_directories(vmp_runtime_vm1 PUBLIC {source_root}/runtime/vm1/include {source_root}/runtime/strings/include {source_root}/runtime/audit/include {source_root}/runtime/integrity/include {source_root}/policy/include {source_root}/arch/common/include)
+target_link_libraries(vmp_runtime_vm1 PUBLIC vmp_runtime_integrity vmp_runtime_strings vmp_runtime_audit vmp_policy vmp_arch_common nlohmann_json::nlohmann_json)
 target_link_libraries(rewriter_lift_sample PRIVATE vmp_runtime_vm1 vmp_runtime_strings vmp_runtime_audit vmp_policy vmp_arch_common nlohmann_json::nlohmann_json)
 ''')
     build = work / 'build'

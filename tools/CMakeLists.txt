@@ -59,6 +59,10 @@ add_executable(vmp-profile-tool ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_profile_tool
 target_link_libraries(vmp-profile-tool PRIVATE vmp_runtime_state nlohmann_json::nlohmann_json)
 set_target_properties(vmp-profile-tool PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
 
+add_executable(vmp-integrity-probe ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_integrity_probe.cpp)
+target_link_libraries(vmp-integrity-probe PRIVATE vmp_runtime_integrity vmp_runtime_strings vmp_runtime_vm1 vmp_runtime_vm2 vmp_runtime_audit nlohmann_json::nlohmann_json)
+set_target_properties(vmp-integrity-probe PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tools)
+
 
 if(VMP_PLATFORM STREQUAL "windows")
   add_executable(vmp-loader-selftest ${CMAKE_CURRENT_SOURCE_DIR}/src/vmp_loader_selftest.cpp)

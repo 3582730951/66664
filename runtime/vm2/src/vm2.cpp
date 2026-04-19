@@ -1,6 +1,7 @@
 #include <vmp/runtime/vm2/vm2.h>
 
 #include <algorithm>
+#include <vmp/runtime/integrity/crc32.h>
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -23,6 +24,24 @@ namespace vmp::runtime::vm2 {
 namespace {
 using ByteVector = std::vector<std::uint8_t>;
 std::atomic<std::uint64_t> g_next_vm2_module_id{1};
+
+constexpr std::size_t kVm2HeaderSize = 4u + 2u + 2u + 4u + 4u + 4u + 4u;
+
+std::string hex_u32(std::uint32_t value) {
+  std::ostringstream oss;
+  oss << "0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << value;
+  return oss.str();
+}
+
+void append_module_crc_mismatch_audit(const std::string& note) noexcept {
+  try {
+    vmp::runtime::audit::AuditWriter writer(vmp::runtime::audit::AuditWriter::default_path());
+    writer.append(vmp::runtime::audit::make_event("vm2_module_crc_mismatch", note, 0, "vm2"));
+    writer.flush();
+  } catch (...) {
+  }
+}
+
 
 struct MemoryOperand {
   std::uint8_t base = 0;
@@ -708,7 +727,7 @@ Vm2Module Vm2Module::load_from_file(const std::string& path) {
 }
 
 Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < 36) throw std::runtime_error("vm2: module too small");
+  if (bytes.size() < kVm2HeaderSize + kVm2KeyContextIdSize) throw std::runtime_error("vm2: module too small");
   Vm2Module module;
   if (!std::equal(kVm2Magic.begin(), kVm2Magic.end(), bytes.begin())) throw std::runtime_error("vm2: bad magic");
   std::size_t offset = 4;
@@ -716,14 +735,20 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   module.module_flags = read_u16(bytes, offset);
   module.entry_pc = read_u32(bytes, offset);
   const auto code_size = read_u32(bytes, offset);
+  const auto const_pool_size = read_u32(bytes, offset);
+  module.crc32 = read_u32(bytes, offset);
   if (module.version != kVm2Version) throw std::runtime_error("vm2: unsupported version");
-  if (offset + code_size > bytes.size()) throw std::runtime_error("vm2: truncated code");
+  if ((const_pool_size % 16u) != 0) throw std::runtime_error("vm2: const pool must be 16-byte aligned");
+  if (offset + code_size + const_pool_size + kVm2KeyContextIdSize > bytes.size()) throw std::runtime_error("vm2: truncated const pool");
+  const auto actual_crc32 = vmp::runtime::integrity::crc32_compute(bytes.data() + kVm2HeaderSize,
+                                                                   code_size + const_pool_size);
+  if (actual_crc32 != module.crc32) {
+    append_module_crc_mismatch_audit("expected=" + hex_u32(module.crc32) + " actual=" + hex_u32(actual_crc32));
+    throw std::runtime_error("vm2: crc32 mismatch");
+  }
   module.code.assign(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
                      bytes.begin() + static_cast<std::ptrdiff_t>(offset + code_size));
   offset += code_size;
-  const auto const_pool_size = read_u32(bytes, offset);
-  if (offset + const_pool_size + kVm2KeyContextIdSize > bytes.size()) throw std::runtime_error("vm2: truncated const pool");
-  if ((const_pool_size % 16u) != 0) throw std::runtime_error("vm2: const pool must be 16-byte aligned");
   module.const_pool.resize(const_pool_size / 16u);
   for (std::size_t i = 0; i < module.const_pool.size(); ++i) {
     std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset + i * 16u), 16, module.const_pool[i].bytes.begin());
@@ -737,15 +762,20 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
 }
 
 std::vector<std::uint8_t> Vm2Module::serialize() const {
+  std::vector<std::uint8_t> body;
+  body.reserve(code.size() + const_pool.size() * 16u);
+  body.insert(body.end(), code.begin(), code.end());
+  for (const auto& entry : const_pool) body.insert(body.end(), entry.bytes.begin(), entry.bytes.end());
   std::vector<std::uint8_t> out;
+  out.reserve(kVm2HeaderSize + body.size() + key_context_id.size());
   out.insert(out.end(), kVm2Magic.begin(), kVm2Magic.end());
-  append_u16(out, version);
+  append_u16(out, kVm2Version);
   append_u16(out, module_flags);
   append_u32(out, entry_pc);
   append_u32(out, static_cast<std::uint32_t>(code.size()));
-  out.insert(out.end(), code.begin(), code.end());
   append_u32(out, static_cast<std::uint32_t>(const_pool.size() * 16u));
-  for (const auto& entry : const_pool) out.insert(out.end(), entry.bytes.begin(), entry.bytes.end());
+  append_u32(out, vmp::runtime::integrity::crc32_compute(body.data(), body.size()));
+  out.insert(out.end(), body.begin(), body.end());
   out.insert(out.end(), key_context_id.begin(), key_context_id.end());
   return out;
 }

@@ -28,6 +28,7 @@ class Vm2Module {
   std::uint16_t version = kVm2Version;
   std::uint16_t module_flags = 0;
   std::uint32_t entry_pc = 0;
+  std::uint32_t crc32 = 0;
   std::vector<std::uint8_t> code;
   std::vector<Vm2ConstPoolEntry> const_pool;
   std::array<std::uint8_t, kVm2KeyContextIdSize> key_context_id{};

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
-#include <vmp/runtime/state/state.h>
+#include <vmp/runtime/integrity/crc32.h>
 #include <vmp/runtime/strings/cipher.h>
 
 namespace vmp::runtime::integrity {
@@ -18,6 +18,27 @@ bool digest_is_zero(const std::uint8_t digest[32]) noexcept {
   return true;
 }
 
+std::mutex& observer_mutex() {
+  static std::mutex mutex;
+  return mutex;
+}
+
+RegionRegistry::VerificationObserver& observer_slot() {
+  static RegionRegistry::VerificationObserver observer;
+  return observer;
+}
+
+void notify_observer(const RegionVerifyResult& result) {
+  RegionRegistry::VerificationObserver observer;
+  {
+    std::lock_guard<std::mutex> lock(observer_mutex());
+    observer = observer_slot();
+  }
+  if (observer) {
+    observer(result);
+  }
+}
+
 }  // namespace
 
 RegionRegistry& RegionRegistry::instance() noexcept {
@@ -25,9 +46,17 @@ RegionRegistry& RegionRegistry::instance() noexcept {
   return registry;
 }
 
+void RegionRegistry::set_verification_observer(VerificationObserver observer) {
+  std::lock_guard<std::mutex> lock(observer_mutex());
+  observer_slot() = std::move(observer);
+}
+
 void RegionRegistry::register_region(ProtectedRegion region) {
   if (region.name.empty() || region.base == nullptr || region.size == 0) {
     throw std::runtime_error("integrity: invalid protected region");
+  }
+  if (!region.expected_crc32.has_value()) {
+    region.expected_crc32 = compute_region_crc32(region);
   }
   if (digest_is_zero(region.expected_sha256)) {
     const auto digest = compute_digest(region);
@@ -52,40 +81,54 @@ std::vector<ProtectedRegion> RegionRegistry::all() const {
   return out;
 }
 
-std::vector<RegionVerifyResult> RegionRegistry::verify_all() const {
+std::vector<RegionVerifyResult> RegionRegistry::verify_all(Mode mode) const {
   const auto snapshot = all();
   std::vector<RegionVerifyResult> out;
   out.reserve(snapshot.size());
   for (const auto& region : snapshot) {
-    out.push_back(verify_one(region.name));
+    out.push_back(verify_one(region.name, mode));
   }
   return out;
 }
 
-RegionVerifyResult RegionRegistry::verify_one(const std::string& name) const {
+RegionVerifyResult RegionRegistry::verify_one(const std::string& name, Mode mode) const {
   ProtectedRegion region;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto it = regions_.find(name);
     if (it == regions_.end()) {
-      return {name, RegionVerifyStatus::missing};
+      return {name, RegionVerifyStatus::missing, mode, false, false, false};
     }
     region = it->second;
   }
   if (region.base == nullptr || region.size == 0) {
-    return {name, RegionVerifyStatus::invalid};
+    return {name, RegionVerifyStatus::invalid, mode, false, false, false};
   }
+
+  RegionVerifyResult result;
+  result.name = name;
+  result.mode = mode;
+  result.crc32_match = region.expected_crc32.has_value() ? (compute_region_crc32(region) == *region.expected_crc32) : true;
+
+  if (mode == Mode::fast) {
+    result.status = result.crc32_match ? RegionVerifyStatus::ok : RegionVerifyStatus::mismatch;
+    if (result.status == RegionVerifyStatus::mismatch) {
+      notify_observer(result);
+    }
+    return result;
+  }
+
   const auto digest = compute_digest(region);
-  if (!std::equal(digest.begin(), digest.end(), region.expected_sha256)) {
-    vmp::runtime::state::RuntimeEventPayload payload;
-    payload.name = name;
-    payload.note = "region=" + name;
-    vmp::runtime::state::RuntimeState::instance().observe(vmp::runtime::state::RuntimeEventKind::integrity_failed,
-                                                          payload);
-    return {name, RegionVerifyStatus::mismatch};
+  result.sha256_checked = true;
+  result.sha256_match = std::equal(digest.begin(), digest.end(), region.expected_sha256);
+  result.status = result.sha256_match ? RegionVerifyStatus::ok : RegionVerifyStatus::mismatch;
+  if (result.status == RegionVerifyStatus::mismatch) {
+    notify_observer(result);
   }
-  return {name, RegionVerifyStatus::ok};
+  return result;
 }
+
+RegionVerifyResult RegionRegistry::verify_one_fast(const std::string& name) const { return verify_one(name, Mode::fast); }
 
 void RegionRegistry::reset_for_tests() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -101,6 +144,10 @@ std::array<std::uint8_t, 32> RegionRegistry::compute_digest(const ProtectedRegio
   return out;
 }
 
+std::uint32_t RegionRegistry::compute_region_crc32(const ProtectedRegion& region) {
+  return crc32_compute(region.base, region.size);
+}
+
 const char* to_string(RegionVerifyStatus status) noexcept {
   switch (status) {
     case RegionVerifyStatus::ok: return "ok";
@@ -109,6 +156,14 @@ const char* to_string(RegionVerifyStatus status) noexcept {
     case RegionVerifyStatus::mismatch: return "mismatch";
   }
   return "invalid";
+}
+
+const char* to_string(RegionRegistry::Mode mode) noexcept {
+  switch (mode) {
+    case RegionRegistry::Mode::fast: return "fast";
+    case RegionRegistry::Mode::authoritative: return "authoritative";
+  }
+  return "authoritative";
 }
 
 const char* Facade::status() const noexcept { return "runtime_integrity_ready"; }

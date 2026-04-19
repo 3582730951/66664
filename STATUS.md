@@ -1239,3 +1239,69 @@
   - VM2 assembler 仍保留其既有独立 label 解析路径；本轮只要求 VM1 / lifter / ELF --lift 共享 resolver。
 - 下一子任务建议：
   - 若后续要进入 subtask 25 以前的 trampoline / island 路径，可直接在 `LabelResolver` 诊断点接入 per-ISA branch expansion，而不需要重写当前 deterministic patch pipeline。
+
+### subtask_22
+- 本轮清单：
+  - 新增 IEEE CRC-32 实现：`runtime/integrity/include/vmp/runtime/integrity/crc32.h` 与 `runtime/integrity/src/crc32.cpp`，提供 one-shot `crc32_compute()` 与 `Crc32Stream` 流式接口，采用 256 项查表算法，反射输入/输出、初值 `0xFFFFFFFF`、终值异或 `0xFFFFFFFF`。
+  - 扩展 `ProtectedRegion` / `RegionRegistry`：注册受保护区域时同时捕获 `expected_crc32` 与既有 `expected_sha256`；新增 `Mode::{fast, authoritative}`、`verify_one_fast()`、`verify_all(mode)` 与校验观察者回调。
+  - 保守解释：为保持 subtask 16 既有测试与默认语义兼容，`verify_one(name)` 的默认 authoritative 路径在 CRC32 之后始终继续计算 SHA-256；`fast` 路径仅做 CRC32。
+  - 新增周期性完整性扫描器：`runtime/integrity/include/vmp/runtime/integrity/periodic_sweeper.h`、`runtime/integrity/src/periodic_sweeper.{h,cpp}`；当 `VMP_INTEGRITY_SWEEP_MS >= 50` 时由 `RuntimeState::init_once()` 启动后台线程，周期执行 `verify_all(Mode::fast)`，遇到 fast mismatch 立即升级为 authoritative 复核。
+  - `RuntimeState` 接入完整性事件：fast mismatch 记录 `integrity_fast_mismatch` 审计；authoritative mismatch 记录 `integrity_authoritative_mismatch`，随后通过 `observe(integrity_failed, ...)` 进入既有降级路径；`shutdown()` 中停止全局 sweeper 并清理回调。
+  - VM1 / VM2 模块头新增 `crc32` 字段并提升版本号：`kVm1Version=3`、`kVm2Version=3`；CRC 覆盖各自 `code + const_pool` body。旧版本模块不再兼容，loader 在 CRC 校验失败时分别写入 `vm1_module_crc_mismatch` / `vm2_module_crc_mismatch` 审计并抛错。
+  - `vmp-vm1-asm` 新增 `--crc-only <module.vm1>` 调试模式，直接读取现有模块并输出 body CRC32；新增 `tools/src/vmp_integrity_probe.cpp`，可对 native / `.vm1` / `.vm2` 文件输出 CRC32 与 SHA-256，并在 `--tamper <offset>:<byte>` 模式下复制到 `/tmp` 后补丁、重算并以非零码返回 mismatch。
+  - `runtime/integrity/README.md` 更新 CRC32 双层校验动机、周期 sweeper 语义、模块头格式变更与版本提升说明。
+  - 新增 `tests/runtime_integrity/` 全套真实测试，覆盖 CRC32 标准向量、stream/oneshot 一致性、region 注册与 fast/authoritative 校验、sweeper 检测、VM1/VM2 CRC 失配拒绝、integrity probe CLI 端到端。
+  - 修复受模块头变更影响的既有测试与集成脚本：更新 `tests/runtime_vm1/vm1_exceptions.cpp` 的篡改位置与 CRC 重算逻辑，更新 `tests/arch/lift_basic_hash_regression.cpp` 基准哈希，并在 `tests/arch/rewriter_lift_integration_elf*.py` 与 `tests/final_matrix/functional_consistency.py` 中补上 `vmp_runtime_integrity` 静态链接与 include 依赖。
+- 本轮变更文件（相对路径）：
+  - `runtime/integrity/CMakeLists.txt`
+  - `runtime/integrity/README.md`
+  - `runtime/integrity/include/vmp/runtime/integrity/crc32.h`
+  - `runtime/integrity/include/vmp/runtime/integrity/periodic_sweeper.h`
+  - `runtime/integrity/include/vmp/runtime/integrity/region.h`
+  - `runtime/integrity/src/crc32.cpp`
+  - `runtime/integrity/src/integrity.cpp`
+  - `runtime/integrity/src/periodic_sweeper.cpp`
+  - `runtime/integrity/src/periodic_sweeper.h`
+  - `runtime/state/CMakeLists.txt`
+  - `runtime/state/src/state_machine.cpp`
+  - `runtime/vm1/include/vmp/runtime/vm1/isa.h`
+  - `runtime/vm1/include/vmp/runtime/vm1/vm1.h`
+  - `runtime/vm1/src/vm1.cpp`
+  - `runtime/vm2/include/vmp/runtime/vm2/isa.h`
+  - `runtime/vm2/include/vmp/runtime/vm2/vm2.h`
+  - `runtime/vm2/src/vm2.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/arch/lift_basic_hash_regression.cpp`
+  - `tests/arch/rewriter_lift_integration_elf.py`
+  - `tests/arch/rewriter_lift_integration_elf_with_loop.py`
+  - `tests/final_matrix/functional_consistency.py`
+  - `tests/runtime_integrity/crc32_ieee_vectors.cpp`
+  - `tests/runtime_integrity/crc32_stream_equals_oneshot.cpp`
+  - `tests/runtime_integrity/integrity_probe_cli.py`
+  - `tests/runtime_integrity/periodic_sweeper_detects_tamper.cpp`
+  - `tests/runtime_integrity/region_crc32_captured_on_register.cpp`
+  - `tests/runtime_integrity/region_escalation_both_mismatch.cpp`
+  - `tests/runtime_integrity/region_escalation_fast_mismatch_authoritative_ok.cpp`
+  - `tests/runtime_integrity/region_verify_fast_mismatch.cpp`
+  - `tests/runtime_integrity/region_verify_fast_ok.cpp`
+  - `tests/runtime_integrity/test_common.h`
+  - `tests/runtime_integrity/vm1_module_crc_mismatch.cpp`
+  - `tests/runtime_integrity/vm2_module_crc_mismatch.cpp`
+  - `tests/runtime_vm1/vm1_exceptions.cpp`
+  - `tools/CMakeLists.txt`
+  - `tools/src/vmp_integrity_probe.cpp`
+  - `tools/src/vmp_vm1_asm.cpp`
+- 验证结果：
+  - workspace（`/workspace/vmp`）：
+    - `cmake --build build -j` ✅
+    - `ctest --test-dir build --output-on-failure` ✅（`154/154 passed`；expected skipped: `rewriter_pe_roundtrip`、`final_matrix_17_5_platform_matrix`）
+    - `cargo test --workspace` ✅（Rust 汇总 `22 passed / 0 failed / 0 ignored`）
+  - clean copy（`/tmp/vmp_port22`）：
+    - `cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64` ✅
+    - `cmake --build build -j` ✅
+    - `ctest --test-dir build --output-on-failure` ✅（`154/154 passed`；expected skipped 同上）
+    - `cargo test --workspace` ✅（Rust 汇总 `22 passed / 0 failed / 0 ignored`）
+- 未完成项：
+  - 当前范围内无额外未完成项；CRC32 硬件加速与更多完整性算法仍保持 out-of-scope。
+- 下一子任务建议：
+  - 若后续进入 VM dispatch / codegen / trampoline 路径，可在当前已稳定的 CRC32 + SHA-256 机制上继续为 VM 容器与入口跳板增加更细粒度的生命周期审计，而不需要再改动完整性框架的默认语义。

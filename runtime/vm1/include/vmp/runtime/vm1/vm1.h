@@ -65,6 +65,7 @@ class Vm1Module {
   std::uint16_t version = kVm1Version;
   std::uint16_t module_flags = 0;
   std::uint32_t entry_pc = 0;
+  std::uint32_t crc32 = 0;
   std::vector<std::uint8_t> code;
   std::vector<ConstPoolEntry> const_pool;
   std::uint64_t runtime_id = 0;
@@ -159,6 +160,7 @@ extern "C" std::uint32_t vmp_vm1_jit_execute_block(Vm1Context* context, std::uin
 extern "C" std::uint32_t vmp_vm1_jit_execute_trace(Vm1Context* context, const std::uint32_t* block_pcs, std::size_t block_count);
 
 Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags = 0);
+std::uint32_t serialized_body_crc32(const std::vector<std::uint8_t>& bytes);
 std::string disassemble_module(const Vm1Module& module);
 std::string opcode_name(Opcode opcode);
 const void* handler_table_identity() noexcept;

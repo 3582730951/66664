@@ -1,5 +1,7 @@
 #include <vmp/runtime/state/state.h>
 #include <vmp/runtime/audit/reaction.h>
+#include <vmp/runtime/integrity/periodic_sweeper.h>
+#include <vmp/runtime/integrity/region.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -52,6 +54,23 @@ bool is_failure_event(RuntimeEventKind kind) noexcept {
          kind == RuntimeEventKind::detection_event || kind == RuntimeEventKind::further_failure;
 }
 
+void handle_integrity_verification(const vmp::runtime::integrity::RegionVerifyResult& result) {
+  if (result.status != vmp::runtime::integrity::RegionVerifyStatus::mismatch) {
+    return;
+  }
+  auto& runtime = RuntimeState::instance();
+  if (result.mode == vmp::runtime::integrity::RegionRegistry::Mode::fast) {
+    runtime.append_audit_event("integrity_fast_mismatch", "region=" + result.name);
+    return;
+  }
+  runtime.append_audit_event("integrity_authoritative_mismatch",
+                             "region=" + result.name + (result.crc32_match ? " source=sha256" : " source=crc32_then_sha256"));
+  RuntimeEventPayload payload;
+  payload.name = result.name;
+  payload.note = "region=" + result.name;
+  runtime.observe(RuntimeEventKind::integrity_failed, payload);
+}
+
 }  // namespace
 
 RuntimeState& RuntimeState::instance() noexcept {
@@ -87,12 +106,14 @@ bool RuntimeState::init_once(vmp::runtime::audit::AuditWriter* audit, RuntimeCon
   vmp::runtime::jit::Vm1Jit::instance().set_audit_writer(audit);
   vmp::runtime::jit::Vm2Jit::instance().set_audit_writer(audit);
 #endif
+  vmp::runtime::integrity::RegionRegistry::set_verification_observer(handle_integrity_verification);
   if (!offline_path.empty()) {
     if (!load_offline_profile(offline_path)) {
       append_audit_event("profile_load_failed", std::string("path=") + offline_path);
     }
   }
   observe(RuntimeEventKind::init_done);
+  vmp::runtime::integrity::maybe_start_periodic_sweeper_from_env(vmp::runtime::integrity::RegionRegistry::instance());
   return true;
 }
 
@@ -420,6 +441,8 @@ RuntimeSnapshot RuntimeState::snapshot() const {
 }
 
 void RuntimeState::shutdown() noexcept {
+  vmp::runtime::integrity::stop_global_periodic_sweeper();
+  vmp::runtime::integrity::RegionRegistry::set_verification_observer({});
   std::lock_guard<std::mutex> lock(mutex_);
   audit_ = nullptr;
   config_ = RuntimeConfig{};

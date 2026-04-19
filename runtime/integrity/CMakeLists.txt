@@ -1,4 +1,6 @@
 add_library(vmp_runtime_integrity STATIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/integrity.cpp)
-target_link_libraries(vmp_runtime_integrity PUBLIC vmp_build_options vmp_policy vmp_runtime_strings vmp_runtime_state)
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/crc32.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/integrity.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/periodic_sweeper.cpp)
+target_link_libraries(vmp_runtime_integrity PUBLIC vmp_build_options vmp_policy vmp_runtime_strings)
 target_include_directories(vmp_runtime_integrity PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

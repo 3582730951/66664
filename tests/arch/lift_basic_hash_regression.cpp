@@ -65,11 +65,11 @@ int main() {
     arm64_view.endian = common::ArchEndianness::little;
     arm64_view.code = {0x00, 0x00, 0x01, 0x8B, 0xC0, 0x03, 0x5F, 0xD6};
 
-    require_hash(x86::X86Lifter{}, x86_view, 0x0c7cc2afffb46f8eull, "x86_lift_basic");
-    require_hash(x64::X64Lifter(common::TargetDomain::vm1), x64_sysv_view, 0x2f506b1b83010bd3ull, "x64_lift_basic_sysv");
-    require_hash(x64::X64Lifter(common::TargetDomain::vm1), x64_msvc_view, 0xd8234036809fbe9bull, "x64_lift_basic_msvc");
-    require_hash(arm::ArmLifter{}, arm_view, 0xa682b0d41b8da745ull, "arm_lift_basic");
-    require_hash(arm64::Arm64Lifter{}, arm64_view, 0xa682b0d41b8da745ull, "arm64_lift_basic");
+    require_hash(x86::X86Lifter{}, x86_view, 0x7e9554b9b890afa2ull, "x86_lift_basic");
+    require_hash(x64::X64Lifter(common::TargetDomain::vm1), x64_sysv_view, 0x92d95d1ae83ea8e0ull, "x64_lift_basic_sysv");
+    require_hash(x64::X64Lifter(common::TargetDomain::vm1), x64_msvc_view, 0x786d1b8168a6e13dull, "x64_lift_basic_msvc");
+    require_hash(arm::ArmLifter{}, arm_view, 0xaaad45c8852c7453ull, "arm_lift_basic");
+    require_hash(arm64::Arm64Lifter{}, arm64_view, 0xaaad45c8852c7453ull, "arm64_lift_basic");
     std::cout << "lift_basic_hash_regression OK\n";
     return 0;
   } catch (const std::exception& ex) {

@@ -35,7 +35,14 @@ int main() {
     try {
       auto module = vm1::assemble_module_text("nop\nret\n");
       auto bytes = module.serialize();
-      bytes[16] = 0xFE;
+      require(bytes.size() > 25u, "serialized vm1 image too small for opcode tamper");
+      bytes[24] = 0xFE;
+      bytes[25] = 0xFF;
+      const auto crc32 = vm1::serialized_body_crc32(bytes);
+      bytes[20] = static_cast<std::uint8_t>(crc32 & 0xFFu);
+      bytes[21] = static_cast<std::uint8_t>((crc32 >> 8u) & 0xFFu);
+      bytes[22] = static_cast<std::uint8_t>((crc32 >> 16u) & 0xFFu);
+      bytes[23] = static_cast<std::uint8_t>((crc32 >> 24u) & 0xFFu);
       auto bad = vm1::Vm1Module::load_from_bytes(bytes);
       vm1::Vm1Context ctx(bad);
       vm1::Vm1Interpreter interpreter;

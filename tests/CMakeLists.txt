@@ -170,6 +170,31 @@ vmp_unset_ci_polluters(vmp_protect_rust_merge)
 vmp_unset_ci_polluters(vmp_protect_rust_merge_compare)
 
 
+
+# runtime/integrity tests
+function(vmp_add_runtime_integrity_test target source)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE vmp_runtime_integrity vmp_runtime_state vmp_runtime_audit vmp_runtime_strings vmp_runtime_vm1 vmp_runtime_vm2 vmp_policy nlohmann_json::nlohmann_json)
+  set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+  add_test(NAME ${target} COMMAND $<TARGET_FILE:${target}>)
+  set_tests_properties(${target} PROPERTIES PASS_REGULAR_EXPRESSION "${target} OK")
+endfunction()
+
+vmp_add_runtime_integrity_test(crc32_ieee_vectors ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/crc32_ieee_vectors.cpp)
+vmp_add_runtime_integrity_test(crc32_stream_equals_oneshot ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/crc32_stream_equals_oneshot.cpp)
+vmp_add_runtime_integrity_test(region_crc32_captured_on_register ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/region_crc32_captured_on_register.cpp)
+vmp_add_runtime_integrity_test(region_verify_fast_ok ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/region_verify_fast_ok.cpp)
+vmp_add_runtime_integrity_test(region_verify_fast_mismatch ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/region_verify_fast_mismatch.cpp)
+vmp_add_runtime_integrity_test(region_escalation_fast_mismatch_authoritative_ok ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/region_escalation_fast_mismatch_authoritative_ok.cpp)
+vmp_add_runtime_integrity_test(region_escalation_both_mismatch ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/region_escalation_both_mismatch.cpp)
+vmp_add_runtime_integrity_test(periodic_sweeper_detects_tamper ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/periodic_sweeper_detects_tamper.cpp)
+vmp_add_runtime_integrity_test(vm1_module_crc_mismatch ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/vm1_module_crc_mismatch.cpp)
+vmp_add_runtime_integrity_test(vm2_module_crc_mismatch ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/vm2_module_crc_mismatch.cpp)
+
+add_test(NAME integrity_probe_cli
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime_integrity/integrity_probe_cli.py $<TARGET_FILE:vmp-vm1-asm> $<TARGET_FILE:vmp-integrity-probe>)
+set_tests_properties(integrity_probe_cli PROPERTIES PASS_REGULAR_EXPRESSION "integrity_probe_cli OK")
+
 # runtime/strings tests
 add_executable(strings_crypto_vectors ${CMAKE_CURRENT_SOURCE_DIR}/strings/crypto_vectors.cpp)
 target_link_libraries(strings_crypto_vectors PRIVATE vmp_runtime_strings vmp_policy)
