@@ -1,6 +1,20 @@
 # arch/arm
 
-- 支持 ABI：AAPCS (`r0..r3`)
+- 支持 ABI：AAPCS32 (`r0..r3`)
 - 发射域：VM1
-- 支持子集：ARM-state `mov/add/sub/and/orr/eor/cmp/b/bl/bx/ldr/str`
-- 条件执行：本轮只稳定支持条件分支；thumb 遇到即给出 `unsupported_thumb_mode` 诊断
+- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, mode, immediate_values, memory, relative_target }`
+- 已验证指令族：
+  - ARM state 数据处理：`mov/add/sub/and/eor/orr/cmp`
+  - 分支：`b/bl/bx/blx` + 条件 `b<cc>`
+  - Load/store：`ldr/str`（imm/reg offset，pre/post）、`ldm/stm`、`swp`
+  - 乘除：`mul/mla/sdiv/udiv`
+  - VFP/NEON 子集：`vmov/vadd.f32`
+  - 系统：`dsb/dmb/isb/clrex/nop`
+  - Thumb 子集：`add/cbz/cbnz/b/ldr` 16-bit 编码判别
+- corpus：244 条内联编码样例
+- real-binary probe：`arm-linux-gnueabihf-gcc -marm ... -c` 生成的 ARMv7 relocatable ELF 对象，`unsupported=0/19 (0.00%)`
+- 当前已知不支持/降级：
+  - Thumb-2 广泛 32-bit 变体、`ldrex/strex`、更全 VFP/NEON lane 语义、`svc/msr/mrs/cps/wfe/wfi/sev` 仍未全部做语义化 lowering
+  - 混合 ARM/Thumb 启动胶水在 real-binary probe 中故意回避，避免把链接器/CRT 模式切换噪声算入 ISA 质量
+- 已知限制：
+  - lifter 仍聚焦 ARM-state 整数/访存/分支主路径；Thumb 与浮点当前主要覆盖 decoder correctness

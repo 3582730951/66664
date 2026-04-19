@@ -2,5 +2,16 @@
 
 - 支持 ABI：AAPCS64 (`x0..x7`)
 - 发射域：VM1
-- 支持子集：`add/sub/mul/sdiv/udiv/lsl/lsr/asr/and/orr/eor/b/bl/ret/b.cond/ldr/str`
-- 条件分支依赖上一条可比较的 `sub`/等价差值更新场景；更复杂 NZCV 组合本轮诊断回退
+- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target }`
+- 已验证指令族：
+  - Data-processing：`adr/adrp/add/sub/and/orr/eor/movz/movk/movn/mul/sdiv/udiv/csel/csinv`
+  - Branch：`b/bl/br/blr/ret/b.cond/cbz/cbnz/tbz/tbnz`
+  - Load/store：`ldr/str/ldur/stur/ldp/stp`
+  - 系统：`svc/brk/nop/wfe/wfi/dmb/dsb/isb`
+- corpus：372 条内联编码样例
+- real-binary probe：`aarch64-linux-gnu-gcc -O0 -c` 生成的 relocatable ELF 对象，`unsupported=0/19 (0.00%)`
+- 当前已知不支持/降级：
+  - 更广 FP/NEON/LSE/SVE 仍未全量语义化；SVE 预留为 diagnostic 路径
+  - 更复杂 pre/post-index、SIMD lane 语义与系统寄存器访问仍以 decoder 保留字节优先
+- 已知限制：
+  - lifter 现阶段覆盖整数/位运算/访存/控制流主路径；更多 FP/SIMD/原子 opcode 留待后续 lowering 扩展

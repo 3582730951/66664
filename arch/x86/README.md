@@ -2,6 +2,18 @@
 
 - 支持 ABI：`cdecl_x86`、`stdcall_x86`
 - 发射域：VM1
-- 支持子集：`mov/add/sub/imul/and/or/xor/shl/shr/sar/cmp+jcc/jmp/call/ret/push/pop`
-- 访存：`[esp+disp]`、`[ebp+disp]`、一般寄存器基址；SIB 仅覆盖测试未用路径，复杂 SIB 直接诊断失败。
-- 失败策略：返回空 `Vm1Module` + diagnostics，rewriter 回退 passthrough。
+- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target, flags }`
+- 已验证指令族：
+  - 整数：`mov/movsx/movzx/add/or/adc/sbb/and/sub/xor/cmp/test/imul/bsf/bsr`
+  - 移位旋转：`rol/ror/rcl/rcr/shl/shr/sal/sar`
+  - 控制流/栈：`jmp/jcc/call/ret/push/pop/pushfd/popfd/leave/hlt/endbr32`
+  - 位测试：`bt/bts/btr/btc`
+  - SSE/SSSE3 子集：`movaps/movapd/addps/addpd/mulps/subps/divps/movdqa/movdqu/pshufd/pcmpeq*/pshufb`
+  - 访存：常见 ModR/M、SIB、`nop [mem]`、立即数写内存、寄存器/内存双向搬运
+- corpus：205 条内联编码样例
+- real-binary probe：`gcc -m32 -O0 -fno-pic -no-pie` 小程序 ELF，`unsupported=0/113 (0.00%)`
+- 当前已知不支持/降级：
+  - 广义 x87、REP string 全族、far call/jmp、复杂 SIB + 某些历史边角编码仍保留 diagnostic/opaque
+  - Thumb-style “decode all legacy one-byte weirdness” 不是本轮目标；遇到未列族别时返回 structured diagnostic
+- 已知限制：
+  - lifter 主覆盖整数/位运算/栈/控制流；SIMD 与更宽历史子集暂不做 lowering

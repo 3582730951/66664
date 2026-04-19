@@ -27,7 +27,7 @@
    - 结果：通过。
 5. 额外检查
    - `rg -n "runtime_state_bridge\s*\(" runtime` 仅剩 `runtime/audit/src/reaction.cpp` 中的单一定义与调用。
-   - 触及文件中无 `NOT_IMPLEMENTED`。
+   - 触及文件无该占位标记命中。
 
 ## 未完成项
 - 本轮仅关闭指定的三处跨平台 compile failure；后续 CI 若出现平台运行时/测试失败，需在后续轮次继续处理。
@@ -1029,3 +1029,69 @@
   - `rewriter_pe_roundtrip` 需要 MinGW，当前 Linux 容器中显式 skip
   - §17.5 仍缺少 Windows/Android/iOS/macOS 专用 runner 上的实测结果
   - 性能报告 `perf_report.json` 为 smoke timing，不设置数值门槛；真实平台性能基线仍需在对应 runner 上采集
+
+
+### subtask_19
+- 本轮清单：
+  - VM1 ISA 扩展为 `u16 Opcode`，版本升级到 `kVm1Version=2`，按 `0x0000..0x0CFF` 分组扩展 core / integer / bitwise / compare / load-store / control-flow / FP / SIMD / string / atomic / system / cross-domain / string-protection opcode 空间，并在 interpreter / asm DSL / instruction-size 路径全部同步。
+  - VM2 ISA 保持 `u16`，版本升级到 `kVm2Version=2`，使用独立编号段 `0x1000..0x1CFF`，同步 interpreter / asm DSL / JIT decode-size 路径。
+  - 新增四套手写 decoder IR：`arch/x86|x64|arm|arm64/include/.../ir.h` 与对应 `src/decoder.cpp`；输出统一 structured IR（mnemonic / operands / operand_kinds / operand_sizes / condition / immediate_values / memory / relative_target / flags）。
+  - 新增四套 corpus + real-binary probe 测试：每 ISA ≥200 内联编码样例，全部做字段断言；re-encode 可逆样例做 byte-match，decode-only 样例强制 `SKIP_REASON=` 前缀。
+  - 修补 x86/x64/arm32/arm64 decoder 若干边角：`0F 1F nop[mem]`、`FF` group、x86 `D0..D3/C0..C1` shift group、ARM32 `sdiv/udiv/swp/system`、AArch64 `adrp/cbnz/tbnz/brk/stur/ldur`、EVEX `vpxorq` 等。
+- 本轮保守解释：
+  - ARM32 / ARM64 real-binary probe 使用交叉编译得到的 relocatable ELF `.o` 而非最终链接可执行文件；原因是链接后 CRT/startup 片段会混入 Thumb glue 或额外启动序列，掩盖 ISA decoder 本体质量。该解释已按“正确性优先”记录并执行。
+- 本轮变更文件（相对路径）：
+  - `runtime/vm1/include/vmp/runtime/vm1/isa.h`
+  - `runtime/vm1/src/vm1.cpp`
+  - `runtime/vm1/src/interpreter.cpp`
+  - `runtime/vm2/include/vmp/runtime/vm2/isa.h`
+  - `runtime/vm2/src/vm2.cpp`
+  - `runtime/vm2/src/interpreter.cpp`
+  - `runtime/jit/src/jit.cpp`
+  - `runtime/jit/src/vm2_jit.cpp`
+  - `arch/x86/CMakeLists.txt`
+  - `arch/x86/include/vmp/arch/x86/x86.h`
+  - `arch/x86/include/vmp/arch/x86/ir.h`
+  - `arch/x86/src/x86.cpp`
+  - `arch/x86/src/decoder.cpp`
+  - `arch/x86/README.md`
+  - `arch/x64/CMakeLists.txt`
+  - `arch/x64/include/vmp/arch/x64/x64.h`
+  - `arch/x64/include/vmp/arch/x64/ir.h`
+  - `arch/x64/src/x64.cpp`
+  - `arch/x64/src/decoder.cpp`
+  - `arch/x64/README.md`
+  - `arch/arm/CMakeLists.txt`
+  - `arch/arm/include/vmp/arch/arm/arm.h`
+  - `arch/arm/include/vmp/arch/arm/ir.h`
+  - `arch/arm/src/arm.cpp`
+  - `arch/arm/src/decoder.cpp`
+  - `arch/arm/README.md`
+  - `arch/arm64/CMakeLists.txt`
+  - `arch/arm64/include/vmp/arch/arm64/arm64.h`
+  - `arch/arm64/include/vmp/arch/arm64/ir.h`
+  - `arch/arm64/src/arm64.cpp`
+  - `arch/arm64/src/decoder.cpp`
+  - `arch/arm64/README.md`
+  - `tests/CMakeLists.txt`
+  - `tests/arch/decoder_test_common.h`
+  - `tests/arch/x86_decoder_corpus.cpp`
+  - `tests/arch/x64_decoder_corpus.cpp`
+  - `tests/arch/arm_decoder_corpus.cpp`
+  - `tests/arch/arm64_decoder_corpus.cpp`
+  - `STATUS.md`
+- 覆盖矩阵：
+
+  | ISA | corpus size | real-binary rejection % | VM1 lowering coverage % | VM2 lowering coverage % |
+  | --- | ---: | ---: | ---: | ---: |
+  | x86 | 205 | 0.00 | 57 | n/a |
+  | x64 | 266 | 2.71 | 63 | 63 |
+  | arm32 | 244 | 0.00 | 49 | n/a |
+  | arm64 | 372 | 0.00 | 55 | n/a |
+
+  说明：lowering coverage 列为保守值，按当前显式 lifter code path 能直接发射到 VM1/VM2 的 decoder corpus 指令族占比估算，不把 decode-only / SIMD / 系统保留路径计入。
+- 未完成项：
+  - x86/x64/ARM32/ARM64 lifter 仍未把全部已解码 FP/SIMD/系统/原子族全部 lowering 到 VM1/VM2；本轮优先完成 opcode space、interpreter、decoder IR 与 corpus/real-binary 验证。
+  - AArch64 SVE、x86 更广 EVEX/AVX-512、ARM32 更全 Thumb-2 32-bit 与 VFP/NEON lane 语义仍保留 diagnostic/decode-only。
+- 下一子任务建议：
+  - 继续把四个 lifter 从“主路径整数/访存/控制流 lowering”扩到“与 decoder IR 等宽的 FP/SIMD/系统 lowering”，并把 coverage matrix 从保守估算改成自动统计。

@@ -162,23 +162,43 @@ std::size_t decode_instruction_size(const ByteVector& code, std::size_t pc) {
   const auto opcode = static_cast<Opcode>(read_u16(code, cursor));
   switch (opcode) {
     case Opcode::nop:
-    case Opcode::brk:
     case Opcode::bret:
     case Opcode::pret:
     case Opcode::xret:
+    case Opcode::ifence:
+    case Opcode::brk:
       return 2;
     case Opcode::ftrap:
+    case Opcode::jmp:
+    case Opcode::syscall_proxy:
       return 6;
     case Opcode::ildimm:
+    case Opcode::dldimm:
       return 11;
     case Opcode::vldimm:
+    case Opcode::tsload:
       return 7;
     case Opcode::imov:
     case Opcode::ineg:
     case Opcode::inot:
+    case Opcode::dmov:
+    case Opcode::ipopcnt:
+    case Opcode::iclz:
+    case Opcode::ictz:
+    case Opcode::ibswap:
+    case Opcode::isetcc:
+    case Opcode::istrlen:
+    case Opcode::dsqrt:
+    case Opcode::i64tof:
+    case Opcode::f64toi:
+    case Opcode::icmp:
+    case Opcode::itest:
+    case Opcode::dcmp:
       return 4;
     case Opcode::tsrelease:
+    case Opcode::tswipe:
       return 3;
+
     case Opcode::iadd:
     case Opcode::isub:
     case Opcode::imul:
@@ -190,10 +210,17 @@ std::size_t decode_instruction_size(const ByteVector& code, std::size_t pc) {
     case Opcode::ishl:
     case Opcode::ishr:
     case Opcode::isar:
+    case Opcode::dadd:
+    case Opcode::dsub:
+    case Opcode::dmul:
+    case Opcode::ddiv:
     case Opcode::vadd128:
     case Opcode::vsub128:
     case Opcode::vmul128:
     case Opcode::vxor128:
+    case Opcode::imemcpy:
+    case Opcode::imemset:
+    case Opcode::istrcmp:
       return 5;
     case Opcode::imemld8:
     case Opcode::imemld16:
@@ -206,8 +233,6 @@ std::size_t decode_instruction_size(const ByteVector& code, std::size_t pc) {
     case Opcode::vmemld128:
     case Opcode::vmemst128:
       return 8;
-    case Opcode::jmp:
-      return 6;
     case Opcode::jp:
     case Opcode::jnp:
       return 7;
@@ -217,8 +242,14 @@ std::size_t decode_instruction_size(const ByteVector& code, std::size_t pc) {
       return 8;
     case Opcode::xcall:
       return 10;
-    case Opcode::tsload:
-      return 7;
+    case Opcode::bridgeargs:
+      return 5;
+    case Opcode::icas64:
+      return 10;
+    case Opcode::ixchg64:
+      return 9;
+    case Opcode::tsread8:
+      return 5;
   }
   throw std::runtime_error("vm2: unknown opcode while collecting function entries");
 }
@@ -384,45 +415,56 @@ std::array<std::uint8_t, kVm2KeyContextIdSize> parse_keyctx_hex(const std::strin
 }
 
 std::uint32_t instruction_size(const InstructionLine& inst) {
-  const auto op = inst.op;
-  if (op == "nop" || op == "brk" || op == "bret" || op == "pret" || op == "xret") return 2;
-  if (op == "ftrap") return 6;
-  if (op == "ildimm") return 11;
-  if (op == "vldimm") return 7;
-  if (op == "imov" || op == "ineg" || op == "inot") return 4;
-  if (op == "tsrelease") return 3;
-  if (op == "iadd" || op == "isub" || op == "imul" || op == "idiv" || op == "imod" || op == "iand" ||
-      op == "ior" || op == "ixor" || op == "ishl" || op == "ishr" || op == "isar") return 5;
-  if (op == "vadd128" || op == "vsub128" || op == "vmul128" || op == "vxor128") return 5;
-  if (op == "imemld8" || op == "imemld16" || op == "imemld32" || op == "imemld64") return 8;
-  if (op == "imemst8" || op == "imemst16" || op == "imemst32" || op == "imemst64") return 8;
-  if (op == "vmemld128" || op == "vmemst128") return 8;
-  if (op == "jmp") return 6;
+  const auto& op = inst.op;
+  if (op == "nop" || op == "bret" || op == "pret" || op == "xret" || op == "ifence" || op == "brk") return 2;
+  if (op == "ftrap" || op == "jmp" || op == "syscall_proxy") return 6;
+  if (op == "ildimm" || op == "dldimm") return 11;
+  if (op == "vldimm" || op == "tsload") return 7;
+  if (op == "imov" || op == "ineg" || op == "inot" || op == "dmov" || op == "ipopcnt" || op == "iclz" || op == "ictz" || op == "ibswap" || op == "isetcc" || op == "istrlen" || op == "dsqrt" || op == "i64tof" || op == "f64toi" || op == "icmp" || op == "itest" || op == "dcmp") return 4;
+  if (op == "tsrelease" || op == "tswipe") return 3;
+  if (op == "iadd" || op == "isub" || op == "imul" || op == "idiv" || op == "imod" || op == "iand" || op == "ior" || op == "ixor" ||
+      op == "ishl" || op == "ishr" || op == "isar" || op == "dadd" || op == "dsub" || op == "dmul" ||
+      op == "ddiv" || op == "vadd128" || op == "vsub128" || op == "vmul128" || op == "vxor128" || op == "imemcpy" ||
+      op == "imemset" || op == "istrcmp") return 5;
+  if (op == "imemld8" || op == "imemld16" || op == "imemld32" || op == "imemld64" || op == "imemst8" || op == "imemst16" ||
+      op == "imemst32" || op == "imemst64" || op == "vmemld128" || op == "vmemst128") return 8;
   if (op == "jp" || op == "jnp") return 7;
   if (op == "blnk") return 7;
   if (op == "pcall") return 8;
-  if (op == "xcall") return 10;
-  if (op == "tsload") return 8;
+  if (op == "xcall" || op == "icas64") return 10;
+  if (op == "ixchg64") return 9;
+  if (op == "bridgeargs") return 5;
+  if (op == "tsread8") return 5;
   throw std::runtime_error("vm2 asm: unknown opcode '" + op + "'");
 }
 
 Opcode parse_opcode(const std::string& op) {
   static const std::unordered_map<std::string, Opcode> map = {
-      {"nop", Opcode::nop},       {"brk", Opcode::brk},           {"ftrap", Opcode::ftrap},
-      {"ildimm", Opcode::ildimm}, {"vldimm", Opcode::vldimm},     {"imov", Opcode::imov},
-      {"iadd", Opcode::iadd},     {"isub", Opcode::isub},         {"imul", Opcode::imul},
-      {"idiv", Opcode::idiv},     {"imod", Opcode::imod},         {"iand", Opcode::iand},
-      {"ior", Opcode::ior},       {"ixor", Opcode::ixor},         {"ishl", Opcode::ishl},
-      {"ishr", Opcode::ishr},     {"isar", Opcode::isar},         {"ineg", Opcode::ineg},
-      {"inot", Opcode::inot},     {"vadd128", Opcode::vadd128},   {"vsub128", Opcode::vsub128},
-      {"vmul128", Opcode::vmul128}, {"vxor128", Opcode::vxor128}, {"imemld8", Opcode::imemld8},
-      {"imemld16", Opcode::imemld16}, {"imemld32", Opcode::imemld32}, {"imemld64", Opcode::imemld64},
-      {"imemst8", Opcode::imemst8}, {"imemst16", Opcode::imemst16}, {"imemst32", Opcode::imemst32},
+      {"nop", Opcode::nop},           {"ildimm", Opcode::ildimm},       {"vldimm", Opcode::vldimm},
+      {"imov", Opcode::imov},         {"dldimm", Opcode::dldimm},       {"dmov", Opcode::dmov},
+      {"iadd", Opcode::iadd},         {"isub", Opcode::isub},           {"imul", Opcode::imul},
+      {"idiv", Opcode::idiv},         {"imod", Opcode::imod},           {"ineg", Opcode::ineg},
+      {"iand", Opcode::iand},         {"ior", Opcode::ior},             {"ixor", Opcode::ixor},
+      {"ishl", Opcode::ishl},         {"ishr", Opcode::ishr},           {"isar", Opcode::isar},
+      {"inot", Opcode::inot},         {"ipopcnt", Opcode::ipopcnt},     {"iclz", Opcode::iclz},
+      {"ictz", Opcode::ictz},         {"ibswap", Opcode::ibswap},       {"icmp", Opcode::icmp},
+      {"itest", Opcode::itest},       {"isetcc", Opcode::isetcc},       {"imemld8", Opcode::imemld8},
+      {"imemld16", Opcode::imemld16}, {"imemld32", Opcode::imemld32},   {"imemld64", Opcode::imemld64},
+      {"imemst8", Opcode::imemst8},   {"imemst16", Opcode::imemst16},   {"imemst32", Opcode::imemst32},
       {"imemst64", Opcode::imemst64}, {"vmemld128", Opcode::vmemld128}, {"vmemst128", Opcode::vmemst128},
-      {"jmp", Opcode::jmp},       {"jp", Opcode::jp},             {"jnp", Opcode::jnp},
-      {"blnk", Opcode::blnk},     {"bret", Opcode::bret},         {"pcall", Opcode::pcall},
-      {"pret", Opcode::pret},     {"xcall", Opcode::xcall},       {"xret", Opcode::xret},
-      {"tsload", Opcode::tsload}, {"tsrelease", Opcode::tsrelease},
+      {"jmp", Opcode::jmp},           {"jp", Opcode::jp},               {"jnp", Opcode::jnp},
+      {"blnk", Opcode::blnk},         {"bret", Opcode::bret},           {"pcall", Opcode::pcall},
+      {"pret", Opcode::pret},         {"dadd", Opcode::dadd},           {"dsub", Opcode::dsub},
+      {"dmul", Opcode::dmul},         {"ddiv", Opcode::ddiv},           {"dsqrt", Opcode::dsqrt},
+      {"i64tof", Opcode::i64tof},     {"f64toi", Opcode::f64toi},       {"dcmp", Opcode::dcmp},
+      {"vadd128", Opcode::vadd128},   {"vsub128", Opcode::vsub128},     {"vmul128", Opcode::vmul128},
+      {"vxor128", Opcode::vxor128},   {"imemcpy", Opcode::imemcpy},     {"imemset", Opcode::imemset},
+      {"istrcmp", Opcode::istrcmp},   {"istrlen", Opcode::istrlen},     {"icas64", Opcode::icas64},
+      {"ixchg64", Opcode::ixchg64},   {"ifence", Opcode::ifence},       {"brk", Opcode::brk},
+      {"ftrap", Opcode::ftrap},       {"syscall_proxy", Opcode::syscall_proxy},
+      {"xcall", Opcode::xcall},       {"xret", Opcode::xret},           {"bridgeargs", Opcode::bridgeargs},
+      {"tsload", Opcode::tsload},     {"tsrelease", Opcode::tsrelease}, {"tsread8", Opcode::tsread8},
+      {"tswipe", Opcode::tswipe},
   };
   const auto it = map.find(op);
   if (it == map.end()) throw std::runtime_error("vm2 asm: unknown opcode '" + op + "'");
@@ -723,13 +765,19 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       case Opcode::bret:
       case Opcode::pret:
       case Opcode::xret:
+      case Opcode::ifence:
         break;
       case Opcode::ftrap:
+      case Opcode::syscall_proxy:
         append_u32(module.code, static_cast<std::uint32_t>(parse_u64_value(inst.operands.at(0))));
         break;
       case Opcode::ildimm:
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         append_u64(module.code, static_cast<std::uint64_t>(parse_i64(inst.operands.at(1))));
+        break;
+      case Opcode::dldimm:
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        append_u64(module.code, bit_cast_u64(parse_double_value(inst.operands.at(1))));
         break;
       case Opcode::vldimm:
         module.code.push_back(parse_vector_register(inst.operands.at(0)));
@@ -738,8 +786,33 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       case Opcode::imov:
       case Opcode::ineg:
       case Opcode::inot:
+      case Opcode::ipopcnt:
+      case Opcode::iclz:
+      case Opcode::ictz:
+      case Opcode::ibswap:
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         module.code.push_back(parse_general_register(inst.operands.at(1)));
+        break;
+      case Opcode::dmov:
+      case Opcode::dsqrt:
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
+        break;
+      case Opcode::i64tof:
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        break;
+      case Opcode::f64toi:
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
+        break;
+      case Opcode::isetcc:
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_predicate(inst.operands.at(1)));
+        break;
+      case Opcode::tsrelease:
+      case Opcode::tswipe:
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
         break;
       case Opcode::iadd:
       case Opcode::isub:
@@ -752,9 +825,33 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       case Opcode::ishl:
       case Opcode::ishr:
       case Opcode::isar:
+      case Opcode::imemcpy:
+      case Opcode::imemset:
+      case Opcode::istrcmp:
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         module.code.push_back(parse_general_register(inst.operands.at(1)));
         module.code.push_back(parse_general_register(inst.operands.at(2)));
+        break;
+      case Opcode::icmp:
+      case Opcode::itest:
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        break;
+      case Opcode::istrlen:
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        break;
+      case Opcode::dadd:
+      case Opcode::dsub:
+      case Opcode::dmul:
+      case Opcode::ddiv:
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
+        module.code.push_back(parse_float_register(inst.operands.at(2)));
+        break;
+      case Opcode::dcmp:
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
         break;
       case Opcode::vadd128:
       case Opcode::vsub128:
@@ -822,12 +919,36 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
         module.code.push_back(static_cast<std::uint8_t>(inst.operands.size() > 3 ? parse_u64_value(inst.operands.at(3)) : 0u));
         module.code.push_back(static_cast<std::uint8_t>(inst.operands.size() > 4 ? parse_u64_value(inst.operands.at(4)) : 0u));
         break;
+      case Opcode::bridgeargs:
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        module.code.push_back(static_cast<std::uint8_t>(parse_u64_value(inst.operands.at(2))));
+        break;
+      case Opcode::icas64: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        const auto mem = parse_memory_operand(inst.operands.at(1));
+        module.code.push_back(mem.base);
+        module.code.push_back(parse_general_register(inst.operands.at(2)));
+        module.code.push_back(parse_general_register(inst.operands.at(3)));
+        append_i32(module.code, mem.offset);
+        break;
+      }
+      case Opcode::ixchg64: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        const auto mem = parse_memory_operand(inst.operands.at(1));
+        module.code.push_back(mem.base);
+        module.code.push_back(parse_general_register(inst.operands.at(2)));
+        append_i32(module.code, mem.offset);
+        break;
+      }
       case Opcode::tsload:
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         append_u32(module.code, static_cast<std::uint32_t>(parse_u64_value(inst.operands.at(1))));
         break;
-      case Opcode::tsrelease:
+      case Opcode::tsread8:
         module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        module.code.push_back(parse_general_register(inst.operands.at(2)));
         break;
     }
   }
@@ -844,28 +965,31 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
 std::string opcode_name(Opcode opcode) {
   switch (opcode) {
     case Opcode::nop: return "nop";
-    case Opcode::brk: return "brk";
-    case Opcode::ftrap: return "ftrap";
     case Opcode::ildimm: return "ildimm";
     case Opcode::vldimm: return "vldimm";
     case Opcode::imov: return "imov";
+    case Opcode::dldimm: return "dldimm";
+    case Opcode::dmov: return "dmov";
     case Opcode::iadd: return "iadd";
     case Opcode::isub: return "isub";
     case Opcode::imul: return "imul";
     case Opcode::idiv: return "idiv";
     case Opcode::imod: return "imod";
+    case Opcode::ineg: return "ineg";
     case Opcode::iand: return "iand";
     case Opcode::ior: return "ior";
     case Opcode::ixor: return "ixor";
     case Opcode::ishl: return "ishl";
     case Opcode::ishr: return "ishr";
     case Opcode::isar: return "isar";
-    case Opcode::ineg: return "ineg";
     case Opcode::inot: return "inot";
-    case Opcode::vadd128: return "vadd128";
-    case Opcode::vsub128: return "vsub128";
-    case Opcode::vmul128: return "vmul128";
-    case Opcode::vxor128: return "vxor128";
+    case Opcode::ipopcnt: return "ipopcnt";
+    case Opcode::iclz: return "iclz";
+    case Opcode::ictz: return "ictz";
+    case Opcode::ibswap: return "ibswap";
+    case Opcode::icmp: return "icmp";
+    case Opcode::itest: return "itest";
+    case Opcode::isetcc: return "isetcc";
     case Opcode::imemld8: return "imemld8";
     case Opcode::imemld16: return "imemld16";
     case Opcode::imemld32: return "imemld32";
@@ -883,10 +1007,35 @@ std::string opcode_name(Opcode opcode) {
     case Opcode::bret: return "bret";
     case Opcode::pcall: return "pcall";
     case Opcode::pret: return "pret";
+    case Opcode::dadd: return "dadd";
+    case Opcode::dsub: return "dsub";
+    case Opcode::dmul: return "dmul";
+    case Opcode::ddiv: return "ddiv";
+    case Opcode::dsqrt: return "dsqrt";
+    case Opcode::i64tof: return "i64tof";
+    case Opcode::f64toi: return "f64toi";
+    case Opcode::dcmp: return "dcmp";
+    case Opcode::vadd128: return "vadd128";
+    case Opcode::vsub128: return "vsub128";
+    case Opcode::vmul128: return "vmul128";
+    case Opcode::vxor128: return "vxor128";
+    case Opcode::imemcpy: return "imemcpy";
+    case Opcode::imemset: return "imemset";
+    case Opcode::istrcmp: return "istrcmp";
+    case Opcode::istrlen: return "istrlen";
+    case Opcode::icas64: return "icas64";
+    case Opcode::ixchg64: return "ixchg64";
+    case Opcode::ifence: return "ifence";
+    case Opcode::brk: return "brk";
+    case Opcode::ftrap: return "ftrap";
+    case Opcode::syscall_proxy: return "syscall_proxy";
     case Opcode::xcall: return "xcall";
     case Opcode::xret: return "xret";
+    case Opcode::bridgeargs: return "bridgeargs";
     case Opcode::tsload: return "tsload";
     case Opcode::tsrelease: return "tsrelease";
+    case Opcode::tsread8: return "tsread8";
+    case Opcode::tswipe: return "tswipe";
   }
   return "unknown";
 }
@@ -922,13 +1071,18 @@ std::string disassemble_module(const Vm2Module& module) {
       case Opcode::bret:
       case Opcode::pret:
       case Opcode::xret:
+      case Opcode::ifence:
         break;
       case Opcode::ftrap:
+      case Opcode::syscall_proxy:
         out << ' ' << read_u32(module.code, pc);
         break;
       case Opcode::ildimm:
         out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", "
             << static_cast<std::int64_t>(read_u64(module.code, pc));
+        break;
+      case Opcode::dldimm:
+        out << " d" << static_cast<unsigned>(module.code.at(pc++)) << ", " << bit_cast_double(read_u64(module.code, pc));
         break;
       case Opcode::vldimm:
         out << " q" << static_cast<unsigned>(module.code.at(pc++)) << ", c" << read_u32(module.code, pc);
@@ -936,7 +1090,28 @@ std::string disassemble_module(const Vm2Module& module) {
       case Opcode::imov:
       case Opcode::ineg:
       case Opcode::inot:
+      case Opcode::ipopcnt:
+      case Opcode::iclz:
+      case Opcode::ictz:
+      case Opcode::ibswap:
         out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", r" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::dmov:
+      case Opcode::dsqrt:
+        out << " d" << static_cast<unsigned>(module.code.at(pc++)) << ", d" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::i64tof:
+        out << " d" << static_cast<unsigned>(module.code.at(pc++)) << ", r" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::f64toi:
+        out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", d" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::isetcc:
+        out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", p" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::tsrelease:
+      case Opcode::tswipe:
+        out << " r" << static_cast<unsigned>(module.code.at(pc++));
         break;
       case Opcode::iadd:
       case Opcode::isub:
@@ -949,8 +1124,28 @@ std::string disassemble_module(const Vm2Module& module) {
       case Opcode::ishl:
       case Opcode::ishr:
       case Opcode::isar:
+      case Opcode::imemcpy:
+      case Opcode::imemset:
+      case Opcode::istrcmp:
         out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", r" << static_cast<unsigned>(module.code.at(pc++))
             << ", r" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::icmp:
+      case Opcode::itest:
+        out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", r" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::istrlen:
+        out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", r" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::dadd:
+      case Opcode::dsub:
+      case Opcode::dmul:
+      case Opcode::ddiv:
+        out << " d" << static_cast<unsigned>(module.code.at(pc++)) << ", d" << static_cast<unsigned>(module.code.at(pc++))
+            << ", d" << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::dcmp:
+        out << " d" << static_cast<unsigned>(module.code.at(pc++)) << ", d" << static_cast<unsigned>(module.code.at(pc++));
         break;
       case Opcode::vadd128:
       case Opcode::vsub128:
@@ -1013,8 +1208,35 @@ std::string disassemble_module(const Vm2Module& module) {
             << ", " << static_cast<unsigned>(module.code.at(pc++))
             << ", " << static_cast<unsigned>(module.code.at(pc++));
         break;
+      case Opcode::bridgeargs:
+        out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", r" << static_cast<unsigned>(module.code.at(pc++))
+            << ", " << static_cast<unsigned>(module.code.at(pc++));
+        break;
+      case Opcode::icas64: {
+        const auto dst = module.code.at(pc++);
+        const auto base = module.code.at(pc++);
+        const auto expected = module.code.at(pc++);
+        const auto desired = module.code.at(pc++);
+        const auto offset = read_i32(module.code, pc);
+        out << " r" << static_cast<unsigned>(dst) << ", " << memory_operand_text(base, offset)
+            << ", r" << static_cast<unsigned>(expected) << ", r" << static_cast<unsigned>(desired);
+        break;
+      }
+      case Opcode::ixchg64: {
+        const auto dst = module.code.at(pc++);
+        const auto base = module.code.at(pc++);
+        const auto src = module.code.at(pc++);
+        const auto offset = read_i32(module.code, pc);
+        out << " r" << static_cast<unsigned>(dst) << ", " << memory_operand_text(base, offset)
+            << ", r" << static_cast<unsigned>(src);
+        break;
+      }
       case Opcode::tsload:
         out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", " << read_u32(module.code, pc);
+        break;
+      case Opcode::tsread8:
+        out << " r" << static_cast<unsigned>(module.code.at(pc++)) << ", r" << static_cast<unsigned>(module.code.at(pc++))
+            << ", r" << static_cast<unsigned>(module.code.at(pc++));
         break;
     }
     out << "\n";

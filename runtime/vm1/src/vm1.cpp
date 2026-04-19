@@ -281,6 +281,17 @@ std::uint8_t parse_float_register(const std::string& token) {
   return static_cast<std::uint8_t>(index);
 }
 
+std::uint8_t parse_vector_register(const std::string& token) {
+  if (token.size() < 3 || token.rfind("vq", 0) != 0) {
+    throw std::runtime_error("vm1 asm: expected vector register, got '" + token + "'");
+  }
+  const auto index = parse_u64_value(token.substr(2));
+  if (index >= kVm1VectorRegisterCount) {
+    throw std::runtime_error("vm1 asm: vector register out of range");
+  }
+  return static_cast<std::uint8_t>(index);
+}
+
 struct MemoryOperand {
   std::uint8_t base = static_cast<std::uint8_t>(MemoryBase::stack_pointer);
   std::int32_t offset = 0;
@@ -320,8 +331,6 @@ MemoryOperand parse_memory_operand(const std::string& token) {
 Opcode parse_opcode(const std::string& op) {
   static const std::map<std::string, Opcode> table = {
       {"nop", Opcode::nop},
-      {"breakpoint", Opcode::breakpoint},
-      {"trap", Opcode::trap},
       {"ldi64", Opcode::ldi64},
       {"ldi_u64", Opcode::ldi_u64},
       {"ldi_f64", Opcode::ldi_f64},
@@ -331,14 +340,21 @@ Opcode parse_opcode(const std::string& op) {
       {"mul", Opcode::mul},
       {"div", Opcode::div},
       {"mod", Opcode::mod},
+      {"neg", Opcode::neg},
       {"and", Opcode::bit_and},
       {"or", Opcode::bit_or},
       {"xor", Opcode::bit_xor},
       {"shl", Opcode::shl},
       {"shr", Opcode::shr},
       {"sar", Opcode::sar},
-      {"neg", Opcode::neg},
       {"not", Opcode::bit_not},
+      {"popcnt", Opcode::popcnt},
+      {"clz", Opcode::clz},
+      {"ctz", Opcode::ctz},
+      {"bswap", Opcode::bswap},
+      {"cmp", Opcode::cmp},
+      {"test", Opcode::test},
+      {"setcc", Opcode::setcc},
       {"load_mem8", Opcode::load_mem8},
       {"load_mem16", Opcode::load_mem16},
       {"load_mem32", Opcode::load_mem32},
@@ -347,6 +363,10 @@ Opcode parse_opcode(const std::string& op) {
       {"store_mem16", Opcode::store_mem16},
       {"store_mem32", Opcode::store_mem32},
       {"store_mem64", Opcode::store_mem64},
+      {"load_sext8", Opcode::load_sext8},
+      {"load_sext16", Opcode::load_sext16},
+      {"load_sext32", Opcode::load_sext32},
+      {"lea", Opcode::lea},
       {"jmp", Opcode::jmp},
       {"jeq", Opcode::jeq},
       {"jne", Opcode::jne},
@@ -356,12 +376,38 @@ Opcode parse_opcode(const std::string& op) {
       {"jge", Opcode::jge},
       {"call", Opcode::call},
       {"ret", Opcode::ret},
+      {"call_indirect", Opcode::call_indirect},
+      {"jmp_indirect", Opcode::jmp_indirect},
+      {"fadd", Opcode::fadd},
+      {"fsub", Opcode::fsub},
+      {"fmul", Opcode::fmul},
+      {"fdiv", Opcode::fdiv},
+      {"fsqrt", Opcode::fsqrt},
+      {"i64_to_f64", Opcode::i64_to_f64},
+      {"f64_to_i64", Opcode::f64_to_i64},
+      {"fcmp", Opcode::fcmp},
+      {"vadd128", Opcode::vadd128},
+      {"vxor128", Opcode::vxor128},
+      {"vshuffle128", Opcode::vshuffle128},
+      {"memcpy", Opcode::memcpy},
+      {"memset", Opcode::memset},
+      {"strcmp", Opcode::strcmp},
+      {"strlen", Opcode::strlen},
+      {"cas_u64", Opcode::cas_u64},
+      {"xchg_u64", Opcode::xchg_u64},
+      {"fence", Opcode::fence},
+      {"breakpoint", Opcode::breakpoint},
+      {"trap", Opcode::trap},
+      {"syscall_proxy", Opcode::syscall_proxy},
       {"domain_call", Opcode::domain_call},
       {"domain_ret", Opcode::domain_ret},
+      {"bridge_args", Opcode::bridge_args},
       {"load_transient_string", Opcode::load_transient_string},
       {"load_tstr", Opcode::load_transient_string},
       {"release_transient_string", Opcode::release_transient_string},
       {"release_tstr", Opcode::release_transient_string},
+      {"transient_read8", Opcode::transient_read8},
+      {"transient_wipe", Opcode::transient_wipe},
   };
   const auto it = table.find(op);
   if (it == table.end()) {
@@ -373,26 +419,37 @@ Opcode parse_opcode(const std::string& op) {
 std::size_t instruction_size(Opcode opcode) {
   switch (opcode) {
     case Opcode::nop:
-    case Opcode::breakpoint:
     case Opcode::ret:
     case Opcode::domain_ret:
-      return 1;
+    case Opcode::fence:
+    case Opcode::breakpoint:
+      return 2;
     case Opcode::trap:
     case Opcode::jmp:
-      return 5;
-    case Opcode::call:
-    case Opcode::load_transient_string:
+    case Opcode::syscall_proxy:
       return 6;
-    case Opcode::release_transient_string:
-      return 2;
     case Opcode::mov:
     case Opcode::neg:
     case Opcode::bit_not:
+    case Opcode::popcnt:
+    case Opcode::clz:
+    case Opcode::ctz:
+    case Opcode::bswap:
+    case Opcode::setcc:
+    case Opcode::fsqrt:
+    case Opcode::i64_to_f64:
+    case Opcode::f64_to_i64:
+    case Opcode::strlen:
+    case Opcode::call_indirect:
+      return 4;
+    case Opcode::jmp_indirect:
+    case Opcode::release_transient_string:
+    case Opcode::transient_wipe:
       return 3;
     case Opcode::ldi64:
     case Opcode::ldi_u64:
     case Opcode::ldi_f64:
-      return 10;
+      return 11;
     case Opcode::add:
     case Opcode::sub:
     case Opcode::mul:
@@ -404,6 +461,20 @@ std::size_t instruction_size(Opcode opcode) {
     case Opcode::shl:
     case Opcode::shr:
     case Opcode::sar:
+    case Opcode::fadd:
+    case Opcode::fsub:
+    case Opcode::fmul:
+    case Opcode::fdiv:
+    case Opcode::vadd128:
+    case Opcode::vxor128:
+    case Opcode::vshuffle128:
+    case Opcode::memcpy:
+    case Opcode::memset:
+    case Opcode::strcmp:
+      return 5;
+    case Opcode::cmp:
+    case Opcode::test:
+    case Opcode::fcmp:
       return 4;
     case Opcode::load_mem8:
     case Opcode::load_mem16:
@@ -413,15 +484,30 @@ std::size_t instruction_size(Opcode opcode) {
     case Opcode::store_mem16:
     case Opcode::store_mem32:
     case Opcode::store_mem64:
-      return 7;
+    case Opcode::load_sext8:
+    case Opcode::load_sext16:
+    case Opcode::load_sext32:
+    case Opcode::lea:
+      return 8;
     case Opcode::jeq:
     case Opcode::jne:
     case Opcode::jlt:
     case Opcode::jle:
     case Opcode::jgt:
     case Opcode::jge:
+      return 8;
+    case Opcode::call:
+    case Opcode::load_transient_string:
       return 7;
     case Opcode::domain_call:
+      return 10;
+    case Opcode::bridge_args:
+      return 5;
+    case Opcode::transient_read8:
+      return 5;
+    case Opcode::cas_u64:
+      return 10;
+    case Opcode::xchg_u64:
       return 9;
   }
   throw std::runtime_error("vm1 asm: size missing");
@@ -537,6 +623,32 @@ std::uint8_t parse_domain_token(const std::string& token) {
   throw std::runtime_error("vm1 asm: unknown domain '" + token + "'");
 }
 
+std::uint8_t parse_condition_code(const std::string& token) {
+  if (token == "eq") return 0;
+  if (token == "ne") return 1;
+  if (token == "lt") return 2;
+  if (token == "le") return 3;
+  if (token == "gt") return 4;
+  if (token == "ge") return 5;
+  return static_cast<std::uint8_t>(parse_u64_value(token));
+}
+
+std::string condition_name(std::uint8_t code) {
+  switch (code) {
+    case 0: return "eq";
+    case 1: return "ne";
+    case 2: return "lt";
+    case 3: return "le";
+    case 4: return "gt";
+    case 5: return "ge";
+    default: {
+      std::ostringstream oss;
+      oss << static_cast<unsigned>(code);
+      return oss.str();
+    }
+  }
+}
+
 void append_i32(ByteVector& out, std::int32_t value) {
   append_u32(out, static_cast<std::uint32_t>(value));
 }
@@ -545,6 +657,16 @@ std::string make_label(std::uint32_t pc) {
   std::ostringstream oss;
   oss << 'L' << std::hex << std::setw(4) << std::setfill('0') << pc;
   return oss.str();
+}
+
+std::uint16_t read_u16_code(const std::vector<std::uint8_t>& code, std::size_t& pc) {
+  if (pc + 2 > code.size()) {
+    throw std::runtime_error("vm1 disasm: truncated u16");
+  }
+  const auto value = static_cast<std::uint16_t>(code[pc]) |
+                     static_cast<std::uint16_t>(code[pc + 1] << 8u);
+  pc += 2;
+  return value;
 }
 
 std::uint32_t read_u32_code(const std::vector<std::uint8_t>& code, std::size_t& pc) {
@@ -581,6 +703,12 @@ std::string base_name(std::uint8_t base) {
   }
   std::ostringstream oss;
   oss << "vr" << static_cast<unsigned>(base);
+  return oss.str();
+}
+
+std::string vector_name(std::uint8_t index) {
+  std::ostringstream oss;
+  oss << "vq" << static_cast<unsigned>(index);
   return oss.str();
 }
 
@@ -804,14 +932,16 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
   }
   for (const auto& inst : program.instructions) {
     const auto opcode = parse_opcode(inst.op);
-    module.code.push_back(static_cast<std::uint8_t>(opcode));
+    append_u16(module.code, static_cast<std::uint16_t>(opcode));
     switch (opcode) {
       case Opcode::nop:
       case Opcode::breakpoint:
       case Opcode::ret:
       case Opcode::domain_ret:
+      case Opcode::fence:
         break;
-      case Opcode::trap: {
+      case Opcode::trap:
+      case Opcode::syscall_proxy: {
         const auto code = inst.operands.empty() ? 0u : static_cast<std::uint32_t>(parse_u64_value(inst.operands.at(0)));
         append_u32(module.code, code);
         break;
@@ -833,7 +963,50 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       }
       case Opcode::mov:
       case Opcode::neg:
-      case Opcode::bit_not: {
+      case Opcode::bit_not:
+      case Opcode::popcnt:
+      case Opcode::clz:
+      case Opcode::ctz:
+      case Opcode::bswap: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::setcc: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_condition_code(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::release_transient_string:
+      case Opcode::transient_wipe: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        break;
+      }
+      case Opcode::call_indirect: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(static_cast<std::uint8_t>(inst.operands.size() >= 2 ? parse_u64_value(inst.operands.at(1)) : 0u));
+        break;
+      }
+      case Opcode::jmp_indirect: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        break;
+      }
+      case Opcode::fsqrt: {
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::i64_to_f64: {
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::f64_to_i64: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::strlen: {
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         module.code.push_back(parse_general_register(inst.operands.at(1)));
         break;
@@ -848,16 +1021,51 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       case Opcode::bit_xor:
       case Opcode::shl:
       case Opcode::shr:
-      case Opcode::sar: {
+      case Opcode::sar:
+      case Opcode::memcpy:
+      case Opcode::memset:
+      case Opcode::strcmp: {
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         module.code.push_back(parse_general_register(inst.operands.at(1)));
         module.code.push_back(parse_general_register(inst.operands.at(2)));
         break;
       }
+      case Opcode::cmp:
+      case Opcode::test: {
+        module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::fadd:
+      case Opcode::fsub:
+      case Opcode::fmul:
+      case Opcode::fdiv: {
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
+        module.code.push_back(parse_float_register(inst.operands.at(2)));
+        break;
+      }
+      case Opcode::fcmp: {
+        module.code.push_back(parse_float_register(inst.operands.at(0)));
+        module.code.push_back(parse_float_register(inst.operands.at(1)));
+        break;
+      }
+      case Opcode::vadd128:
+      case Opcode::vxor128:
+      case Opcode::vshuffle128: {
+        module.code.push_back(parse_vector_register(inst.operands.at(0)));
+        module.code.push_back(parse_vector_register(inst.operands.at(1)));
+        module.code.push_back(parse_vector_register(inst.operands.at(2)));
+        break;
+      }
       case Opcode::load_mem8:
       case Opcode::load_mem16:
       case Opcode::load_mem32:
-      case Opcode::load_mem64: {
+      case Opcode::load_mem64:
+      case Opcode::load_sext8:
+      case Opcode::load_sext16:
+      case Opcode::load_sext32:
+      case Opcode::lea: {
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         const auto mem = parse_memory_operand(inst.operands.at(1));
         module.code.push_back(mem.base);
@@ -891,8 +1099,7 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       }
       case Opcode::call: {
         append_u32(module.code, resolve_target(inst.operands.at(0), program.labels));
-        const auto arg_count = inst.operands.size() >= 2 ? parse_u64_value(inst.operands.at(1)) : 0u;
-        module.code.push_back(static_cast<std::uint8_t>(arg_count));
+        module.code.push_back(static_cast<std::uint8_t>(inst.operands.size() >= 2 ? parse_u64_value(inst.operands.at(1)) : 0u));
         break;
       }
       case Opcode::domain_call: {
@@ -903,13 +1110,38 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
         module.code.push_back(static_cast<std::uint8_t>(inst.operands.size() >= 5 ? parse_u64_value(inst.operands.at(4)) : 0u));
         break;
       }
+      case Opcode::bridge_args: {
+        module.code.push_back(static_cast<std::uint8_t>(parse_u64_value(inst.operands.at(0))));
+        module.code.push_back(static_cast<std::uint8_t>(inst.operands.size() >= 2 ? parse_u64_value(inst.operands.at(1)) : 0u));
+        module.code.push_back(static_cast<std::uint8_t>(inst.operands.size() >= 3 ? parse_u64_value(inst.operands.at(2)) : 0u));
+        break;
+      }
       case Opcode::load_transient_string: {
         module.code.push_back(parse_general_register(inst.operands.at(0)));
         append_u32(module.code, parse_string_id_token(inst.operands.at(1)));
         break;
       }
-      case Opcode::release_transient_string: {
+      case Opcode::transient_read8: {
         module.code.push_back(parse_general_register(inst.operands.at(0)));
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        module.code.push_back(parse_general_register(inst.operands.at(2)));
+        break;
+      }
+      case Opcode::cas_u64: {
+        const auto mem = parse_memory_operand(inst.operands.at(0));
+        module.code.push_back(mem.base);
+        module.code.push_back(parse_general_register(inst.operands.at(3)));
+        append_i32(module.code, mem.offset);
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
+        module.code.push_back(parse_general_register(inst.operands.at(2)));
+        break;
+      }
+      case Opcode::xchg_u64: {
+        const auto mem = parse_memory_operand(inst.operands.at(0));
+        module.code.push_back(mem.base);
+        module.code.push_back(parse_general_register(inst.operands.at(2)));
+        append_i32(module.code, mem.offset);
+        module.code.push_back(parse_general_register(inst.operands.at(1)));
         break;
       }
     }
@@ -920,8 +1152,6 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
 std::string opcode_name(Opcode opcode) {
   switch (opcode) {
     case Opcode::nop: return "nop";
-    case Opcode::breakpoint: return "breakpoint";
-    case Opcode::trap: return "trap";
     case Opcode::ldi64: return "ldi64";
     case Opcode::ldi_u64: return "ldi_u64";
     case Opcode::ldi_f64: return "ldi_f64";
@@ -931,14 +1161,21 @@ std::string opcode_name(Opcode opcode) {
     case Opcode::mul: return "mul";
     case Opcode::div: return "div";
     case Opcode::mod: return "mod";
+    case Opcode::neg: return "neg";
     case Opcode::bit_and: return "and";
     case Opcode::bit_or: return "or";
     case Opcode::bit_xor: return "xor";
     case Opcode::shl: return "shl";
     case Opcode::shr: return "shr";
     case Opcode::sar: return "sar";
-    case Opcode::neg: return "neg";
     case Opcode::bit_not: return "not";
+    case Opcode::popcnt: return "popcnt";
+    case Opcode::clz: return "clz";
+    case Opcode::ctz: return "ctz";
+    case Opcode::bswap: return "bswap";
+    case Opcode::cmp: return "cmp";
+    case Opcode::test: return "test";
+    case Opcode::setcc: return "setcc";
     case Opcode::load_mem8: return "load_mem8";
     case Opcode::load_mem16: return "load_mem16";
     case Opcode::load_mem32: return "load_mem32";
@@ -947,6 +1184,10 @@ std::string opcode_name(Opcode opcode) {
     case Opcode::store_mem16: return "store_mem16";
     case Opcode::store_mem32: return "store_mem32";
     case Opcode::store_mem64: return "store_mem64";
+    case Opcode::load_sext8: return "load_sext8";
+    case Opcode::load_sext16: return "load_sext16";
+    case Opcode::load_sext32: return "load_sext32";
+    case Opcode::lea: return "lea";
     case Opcode::jmp: return "jmp";
     case Opcode::jeq: return "jeq";
     case Opcode::jne: return "jne";
@@ -956,10 +1197,36 @@ std::string opcode_name(Opcode opcode) {
     case Opcode::jge: return "jge";
     case Opcode::call: return "call";
     case Opcode::ret: return "ret";
+    case Opcode::call_indirect: return "call_indirect";
+    case Opcode::jmp_indirect: return "jmp_indirect";
+    case Opcode::fadd: return "fadd";
+    case Opcode::fsub: return "fsub";
+    case Opcode::fmul: return "fmul";
+    case Opcode::fdiv: return "fdiv";
+    case Opcode::fsqrt: return "fsqrt";
+    case Opcode::i64_to_f64: return "i64_to_f64";
+    case Opcode::f64_to_i64: return "f64_to_i64";
+    case Opcode::fcmp: return "fcmp";
+    case Opcode::vadd128: return "vadd128";
+    case Opcode::vxor128: return "vxor128";
+    case Opcode::vshuffle128: return "vshuffle128";
+    case Opcode::memcpy: return "memcpy";
+    case Opcode::memset: return "memset";
+    case Opcode::strcmp: return "strcmp";
+    case Opcode::strlen: return "strlen";
+    case Opcode::cas_u64: return "cas_u64";
+    case Opcode::xchg_u64: return "xchg_u64";
+    case Opcode::fence: return "fence";
+    case Opcode::breakpoint: return "breakpoint";
+    case Opcode::trap: return "trap";
+    case Opcode::syscall_proxy: return "syscall_proxy";
     case Opcode::domain_call: return "domain_call";
     case Opcode::domain_ret: return "domain_ret";
+    case Opcode::bridge_args: return "bridge_args";
     case Opcode::load_transient_string: return "load_transient_string";
     case Opcode::release_transient_string: return "release_transient_string";
+    case Opcode::transient_read8: return "transient_read8";
+    case Opcode::transient_wipe: return "transient_wipe";
   }
   return "unknown";
 }
@@ -969,7 +1236,7 @@ std::string disassemble_module(const Vm1Module& module) {
   labels[module.entry_pc] = "entry";
   for (std::size_t pc = 0; pc < module.code.size();) {
     const auto start = static_cast<std::uint32_t>(pc);
-    const auto opcode = static_cast<Opcode>(module.code[pc++]);
+    const auto opcode = static_cast<Opcode>(read_u16_code(module.code, pc));
     switch (opcode) {
       case Opcode::jmp:
       case Opcode::call: {
@@ -1000,18 +1267,19 @@ std::string disassemble_module(const Vm1Module& module) {
     if (const auto it = labels.find(static_cast<std::uint32_t>(pc)); it != labels.end()) {
       out << it->second << ":\n";
     }
-    const auto opcode = static_cast<Opcode>(module.code[pc++]);
+    const auto opcode = static_cast<Opcode>(read_u16_code(module.code, pc));
     out << "  " << opcode_name(opcode);
     switch (opcode) {
       case Opcode::nop:
-      case Opcode::breakpoint:
       case Opcode::ret:
       case Opcode::domain_ret:
+      case Opcode::fence:
+      case Opcode::breakpoint:
         break;
-      case Opcode::trap: {
+      case Opcode::trap:
+      case Opcode::syscall_proxy:
         out << ' ' << read_u32_code(module.code, pc);
         break;
-      }
       case Opcode::ldi64: {
         const auto reg = module.code[pc++];
         out << " vr" << static_cast<unsigned>(reg) << ", " << static_cast<std::int64_t>(read_u64_code(module.code, pc));
@@ -1029,7 +1297,54 @@ std::string disassemble_module(const Vm1Module& module) {
       }
       case Opcode::mov:
       case Opcode::neg:
-      case Opcode::bit_not: {
+      case Opcode::bit_not:
+      case Opcode::popcnt:
+      case Opcode::clz:
+      case Opcode::ctz:
+      case Opcode::bswap: {
+        const auto dst = module.code[pc++];
+        const auto src = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(dst) << ", vr" << static_cast<unsigned>(src);
+        break;
+      }
+      case Opcode::setcc: {
+        const auto dst = module.code[pc++];
+        const auto cc = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(dst) << ", " << condition_name(cc);
+        break;
+      }
+      case Opcode::release_transient_string:
+      case Opcode::transient_wipe:
+      case Opcode::jmp_indirect: {
+        const auto reg = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(reg);
+        break;
+      }
+      case Opcode::call_indirect: {
+        const auto reg = module.code[pc++];
+        const auto argc = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(reg) << ", " << static_cast<unsigned>(argc);
+        break;
+      }
+      case Opcode::fsqrt: {
+        const auto dst = module.code[pc++];
+        const auto src = module.code[pc++];
+        out << " vfr" << static_cast<unsigned>(dst) << ", vfr" << static_cast<unsigned>(src);
+        break;
+      }
+      case Opcode::i64_to_f64: {
+        const auto dst = module.code[pc++];
+        const auto src = module.code[pc++];
+        out << " vfr" << static_cast<unsigned>(dst) << ", vr" << static_cast<unsigned>(src);
+        break;
+      }
+      case Opcode::f64_to_i64: {
+        const auto dst = module.code[pc++];
+        const auto src = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(dst) << ", vfr" << static_cast<unsigned>(src);
+        break;
+      }
+      case Opcode::strlen: {
         const auto dst = module.code[pc++];
         const auto src = module.code[pc++];
         out << " vr" << static_cast<unsigned>(dst) << ", vr" << static_cast<unsigned>(src);
@@ -1045,18 +1360,56 @@ std::string disassemble_module(const Vm1Module& module) {
       case Opcode::bit_xor:
       case Opcode::shl:
       case Opcode::shr:
-      case Opcode::sar: {
+      case Opcode::sar:
+      case Opcode::memcpy:
+      case Opcode::memset:
+      case Opcode::strcmp: {
         const auto dst = module.code[pc++];
         const auto lhs = module.code[pc++];
         const auto rhs = module.code[pc++];
-        out << " vr" << static_cast<unsigned>(dst) << ", vr" << static_cast<unsigned>(lhs)
-            << ", vr" << static_cast<unsigned>(rhs);
+        out << " vr" << static_cast<unsigned>(dst) << ", vr" << static_cast<unsigned>(lhs) << ", vr" << static_cast<unsigned>(rhs);
+        break;
+      }
+      case Opcode::cmp:
+      case Opcode::test: {
+        const auto lhs = module.code[pc++];
+        const auto rhs = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(lhs) << ", vr" << static_cast<unsigned>(rhs);
+        break;
+      }
+      case Opcode::fadd:
+      case Opcode::fsub:
+      case Opcode::fmul:
+      case Opcode::fdiv: {
+        const auto dst = module.code[pc++];
+        const auto lhs = module.code[pc++];
+        const auto rhs = module.code[pc++];
+        out << " vfr" << static_cast<unsigned>(dst) << ", vfr" << static_cast<unsigned>(lhs) << ", vfr" << static_cast<unsigned>(rhs);
+        break;
+      }
+      case Opcode::fcmp: {
+        const auto lhs = module.code[pc++];
+        const auto rhs = module.code[pc++];
+        out << " vfr" << static_cast<unsigned>(lhs) << ", vfr" << static_cast<unsigned>(rhs);
+        break;
+      }
+      case Opcode::vadd128:
+      case Opcode::vxor128:
+      case Opcode::vshuffle128: {
+        const auto dst = module.code[pc++];
+        const auto lhs = module.code[pc++];
+        const auto rhs = module.code[pc++];
+        out << ' ' << vector_name(dst) << ", " << vector_name(lhs) << ", " << vector_name(rhs);
         break;
       }
       case Opcode::load_mem8:
       case Opcode::load_mem16:
       case Opcode::load_mem32:
-      case Opcode::load_mem64: {
+      case Opcode::load_mem64:
+      case Opcode::load_sext8:
+      case Opcode::load_sext16:
+      case Opcode::load_sext32:
+      case Opcode::lea: {
         const auto dst = module.code[pc++];
         const auto base = module.code[pc++];
         const auto offset = read_i32_code(module.code, pc);
@@ -1087,8 +1440,7 @@ std::string disassemble_module(const Vm1Module& module) {
         const auto lhs = module.code[pc++];
         const auto rhs = module.code[pc++];
         const auto target = read_u32_code(module.code, pc);
-        out << " vr" << static_cast<unsigned>(lhs) << ", vr" << static_cast<unsigned>(rhs)
-            << ", @" << labels.at(target);
+        out << " vr" << static_cast<unsigned>(lhs) << ", vr" << static_cast<unsigned>(rhs) << ", @" << labels.at(target);
         break;
       }
       case Opcode::call: {
@@ -1104,8 +1456,14 @@ std::string disassemble_module(const Vm1Module& module) {
         const auto fc = module.code[pc++];
         const auto oc = module.code[pc++];
         const char* domain_name = domain == 0 ? "native" : (domain == 1 ? "vm1" : "vm2");
-        out << ' ' << domain_name << ", " << id << ", " << static_cast<unsigned>(ic)
-            << ", " << static_cast<unsigned>(fc) << ", " << static_cast<unsigned>(oc);
+        out << ' ' << domain_name << ", " << id << ", " << static_cast<unsigned>(ic) << ", " << static_cast<unsigned>(fc) << ", " << static_cast<unsigned>(oc);
+        break;
+      }
+      case Opcode::bridge_args: {
+        const auto ic = module.code[pc++];
+        const auto fc = module.code[pc++];
+        const auto oc = module.code[pc++];
+        out << ' ' << static_cast<unsigned>(ic) << ", " << static_cast<unsigned>(fc) << ", " << static_cast<unsigned>(oc);
         break;
       }
       case Opcode::load_transient_string: {
@@ -1113,9 +1471,28 @@ std::string disassemble_module(const Vm1Module& module) {
         out << " vr" << static_cast<unsigned>(reg) << ", &sid" << read_u32_code(module.code, pc);
         break;
       }
-      case Opcode::release_transient_string: {
-        const auto reg = module.code[pc++];
-        out << " vr" << static_cast<unsigned>(reg);
+      case Opcode::transient_read8: {
+        const auto dst = module.code[pc++];
+        const auto handle = module.code[pc++];
+        const auto index = module.code[pc++];
+        out << " vr" << static_cast<unsigned>(dst) << ", vr" << static_cast<unsigned>(handle) << ", vr" << static_cast<unsigned>(index);
+        break;
+      }
+      case Opcode::cas_u64: {
+        const auto base = module.code[pc++];
+        const auto dst = module.code[pc++];
+        const auto offset = read_i32_code(module.code, pc);
+        const auto expected = module.code[pc++];
+        const auto desired = module.code[pc++];
+        out << ' ' << memory_operand_text(base, offset) << ", vr" << static_cast<unsigned>(expected) << ", vr" << static_cast<unsigned>(desired) << ", vr" << static_cast<unsigned>(dst);
+        break;
+      }
+      case Opcode::xchg_u64: {
+        const auto base = module.code[pc++];
+        const auto dst = module.code[pc++];
+        const auto offset = read_i32_code(module.code, pc);
+        const auto src = module.code[pc++];
+        out << ' ' << memory_operand_text(base, offset) << ", vr" << static_cast<unsigned>(src) << ", vr" << static_cast<unsigned>(dst);
         break;
       }
     }
@@ -1123,14 +1500,12 @@ std::string disassemble_module(const Vm1Module& module) {
   }
   for (std::size_t i = 0; i < module.const_pool.size(); ++i) {
     if (module.const_pool[i].kind == ConstKind::transient_string) {
-      out << ".const string " << i << ' '
-          << escape_string(std::string_view(reinterpret_cast<const char*>(module.const_pool[i].bytes.data()),
-                                            module.const_pool[i].bytes.size()))
-          << '\n';
+      out << ".const string " << i << ' ' << escape_string(std::string_view(reinterpret_cast<const char*>(module.const_pool[i].bytes.data()), module.const_pool[i].bytes.size())) << '\n';
     }
   }
   return out.str();
 }
+
 
 namespace {
 inline constexpr int kVm1HandlerTableIdentity = 0x56314D31;

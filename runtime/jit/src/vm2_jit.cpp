@@ -144,22 +144,41 @@ std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::
   const auto opcode = static_cast<Opcode>(read_u16(code, cursor));
   switch (opcode) {
     case Opcode::nop:
-    case Opcode::brk:
     case Opcode::bret:
     case Opcode::pret:
     case Opcode::xret:
+    case Opcode::ifence:
+    case Opcode::brk:
       return 2;
     case Opcode::ftrap:
+    case Opcode::jmp:
+    case Opcode::syscall_proxy:
       return 6;
     case Opcode::ildimm:
+    case Opcode::dldimm:
       return 11;
     case Opcode::vldimm:
+    case Opcode::tsload:
       return 7;
     case Opcode::imov:
     case Opcode::ineg:
     case Opcode::inot:
+    case Opcode::dmov:
+    case Opcode::ipopcnt:
+    case Opcode::iclz:
+    case Opcode::ictz:
+    case Opcode::ibswap:
+    case Opcode::isetcc:
+    case Opcode::istrlen:
+    case Opcode::dsqrt:
+    case Opcode::i64tof:
+    case Opcode::f64toi:
+    case Opcode::icmp:
+    case Opcode::itest:
+    case Opcode::dcmp:
       return 4;
     case Opcode::tsrelease:
+    case Opcode::tswipe:
       return 3;
     case Opcode::iadd:
     case Opcode::isub:
@@ -172,10 +191,17 @@ std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::
     case Opcode::ishl:
     case Opcode::ishr:
     case Opcode::isar:
+    case Opcode::dadd:
+    case Opcode::dsub:
+    case Opcode::dmul:
+    case Opcode::ddiv:
     case Opcode::vadd128:
     case Opcode::vsub128:
     case Opcode::vmul128:
     case Opcode::vxor128:
+    case Opcode::imemcpy:
+    case Opcode::imemset:
+    case Opcode::istrcmp:
       return 5;
     case Opcode::imemld8:
     case Opcode::imemld16:
@@ -188,8 +214,6 @@ std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::
     case Opcode::vmemld128:
     case Opcode::vmemst128:
       return 8;
-    case Opcode::jmp:
-      return 6;
     case Opcode::jp:
     case Opcode::jnp:
       return 7;
@@ -198,9 +222,13 @@ std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::
     case Opcode::pcall:
       return 8;
     case Opcode::xcall:
+    case Opcode::icas64:
       return 10;
-    case Opcode::tsload:
-      return 7;
+    case Opcode::ixchg64:
+      return 9;
+    case Opcode::bridgeargs:
+    case Opcode::tsread8:
+      return 5;
   }
   throw std::runtime_error("vm2_jit: unknown opcode");
 }

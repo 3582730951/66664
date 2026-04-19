@@ -591,6 +591,30 @@ set_target_properties(x86_lift_basic PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE
 add_test(NAME x86_lift_basic COMMAND $<TARGET_FILE:x86_lift_basic>)
 set_tests_properties(x86_lift_basic PROPERTIES PASS_REGULAR_EXPRESSION "x86_lift_basic OK")
 
+add_executable(x64_decoder_corpus ${CMAKE_CURRENT_SOURCE_DIR}/arch/x64_decoder_corpus.cpp)
+target_link_libraries(x64_decoder_corpus PRIVATE vmp_arch_x64 vmp_runtime_vm1 vmp_runtime_vm2)
+set_target_properties(x64_decoder_corpus PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME x64_decoder_corpus COMMAND $<TARGET_FILE:x64_decoder_corpus>)
+set_tests_properties(x64_decoder_corpus PROPERTIES PASS_REGULAR_EXPRESSION "x64_decoder_corpus OK")
+
+add_executable(x86_decoder_corpus ${CMAKE_CURRENT_SOURCE_DIR}/arch/x86_decoder_corpus.cpp)
+target_link_libraries(x86_decoder_corpus PRIVATE vmp_arch_x86 vmp_runtime_vm1)
+set_target_properties(x86_decoder_corpus PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME x86_decoder_corpus COMMAND $<TARGET_FILE:x86_decoder_corpus>)
+set_tests_properties(x86_decoder_corpus PROPERTIES PASS_REGULAR_EXPRESSION "x86_decoder_corpus OK")
+
+add_executable(arm_decoder_corpus ${CMAKE_CURRENT_SOURCE_DIR}/arch/arm_decoder_corpus.cpp)
+target_link_libraries(arm_decoder_corpus PRIVATE vmp_arch_arm vmp_runtime_vm1)
+set_target_properties(arm_decoder_corpus PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME arm_decoder_corpus COMMAND $<TARGET_FILE:arm_decoder_corpus>)
+set_tests_properties(arm_decoder_corpus PROPERTIES PASS_REGULAR_EXPRESSION "arm_decoder_corpus OK")
+
+add_executable(arm64_decoder_corpus ${CMAKE_CURRENT_SOURCE_DIR}/arch/arm64_decoder_corpus.cpp)
+target_link_libraries(arm64_decoder_corpus PRIVATE vmp_arch_arm64 vmp_runtime_vm1)
+set_target_properties(arm64_decoder_corpus PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME arm64_decoder_corpus COMMAND $<TARGET_FILE:arm64_decoder_corpus>)
+set_tests_properties(arm64_decoder_corpus PROPERTIES PASS_REGULAR_EXPRESSION "arm64_decoder_corpus OK")
+
 add_executable(x64_lift_basic_sysv ${CMAKE_CURRENT_SOURCE_DIR}/arch/x64_lift_basic_sysv.cpp)
 target_link_libraries(x64_lift_basic_sysv PRIVATE vmp_arch_x64 vmp_runtime_vm1 vmp_runtime_vm2)
 set_target_properties(x64_lift_basic_sysv PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)

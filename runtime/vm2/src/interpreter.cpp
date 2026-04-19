@@ -90,6 +90,44 @@ void set_predicates_from_vec(Vm2Context& context, const Vec128& value) {
   context.p[3] = false;
 }
 
+std::uint64_t count_leading_zeros(std::uint64_t value) {
+  if (value == 0) return 64;
+#if defined(__GNUC__) || defined(__clang__)
+  return static_cast<std::uint64_t>(__builtin_clzll(value));
+#else
+  std::uint64_t count = 0;
+  for (std::uint64_t mask = 1ull << 63; (value & mask) == 0; mask >>= 1) ++count;
+  return count;
+#endif
+}
+
+std::uint64_t count_trailing_zeros(std::uint64_t value) {
+  if (value == 0) return 64;
+#if defined(__GNUC__) || defined(__clang__)
+  return static_cast<std::uint64_t>(__builtin_ctzll(value));
+#else
+  std::uint64_t count = 0;
+  while ((value & 1u) == 0u) {
+    value >>= 1u;
+    ++count;
+  }
+  return count;
+#endif
+}
+
+std::uint64_t count_population(std::uint64_t value) {
+#if defined(__GNUC__) || defined(__clang__)
+  return static_cast<std::uint64_t>(__builtin_popcountll(value));
+#else
+  std::uint64_t out = 0;
+  while (value != 0) {
+    out += value & 1u;
+    value >>= 1u;
+  }
+  return out;
+#endif
+}
+
 bool overflow_add(std::int64_t lhs, std::int64_t rhs, std::int64_t result) {
   return ((lhs ^ result) & (rhs ^ result)) < 0;
 }
@@ -216,6 +254,16 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           set_predicates_from_value(context, imm);
           break;
         }
+        case Opcode::dldimm: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto imm = bit_cast_double(read_u64(context.module->code, cursor));
+          context.d.at(dst) = imm;
+          context.p[0] = (imm == 0.0);
+          context.p[1] = std::signbit(imm);
+          context.p[2] = false;
+          context.p[3] = false;
+          break;
+        }
         case Opcode::vldimm: {
           const auto dst = context.module->code.at(cursor++);
           const auto index = read_u32(context.module->code, cursor);
@@ -232,6 +280,16 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           const auto src = context.module->code.at(cursor++);
           context.r.at(dst) = context.r.at(src);
           set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::dmov: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          context.d.at(dst) = context.d.at(src);
+          context.p[0] = (context.d.at(dst) == 0.0);
+          context.p[1] = std::signbit(context.d.at(dst));
+          context.p[2] = false;
+          context.p[3] = false;
           break;
         }
         case Opcode::iadd:
@@ -288,12 +346,105 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           break;
         }
         case Opcode::ineg:
-        case Opcode::inot: {
+        case Opcode::inot:
+        case Opcode::ipopcnt:
+        case Opcode::iclz:
+        case Opcode::ictz:
+        case Opcode::ibswap: {
           const auto dst = context.module->code.at(cursor++);
           const auto src = context.module->code.at(cursor++);
-          const auto result = opcode == Opcode::ineg ? static_cast<std::uint64_t>(-static_cast<std::int64_t>(context.r.at(src))) : ~context.r.at(src);
+          const auto value = context.r.at(src);
+          std::uint64_t result = 0;
+          switch (opcode) {
+            case Opcode::ineg: result = static_cast<std::uint64_t>(-static_cast<std::int64_t>(value)); break;
+            case Opcode::inot: result = ~value; break;
+            case Opcode::ipopcnt: result = count_population(value); break;
+            case Opcode::iclz: result = count_leading_zeros(value); break;
+            case Opcode::ictz: result = count_trailing_zeros(value); break;
+            case Opcode::ibswap: result = __builtin_bswap64(value); break;
+            default: break;
+          }
           context.r.at(dst) = result;
           set_predicates_from_value(context, result);
+          break;
+        }
+        case Opcode::icmp:
+        case Opcode::itest: {
+          const auto lhs = context.r.at(context.module->code.at(cursor++));
+          const auto rhs = context.r.at(context.module->code.at(cursor++));
+          if (opcode == Opcode::icmp) {
+            const auto diff = lhs - rhs;
+            set_predicates_from_value(context, diff, lhs < rhs,
+                                      overflow_sub(static_cast<std::int64_t>(lhs), static_cast<std::int64_t>(rhs), static_cast<std::int64_t>(diff)));
+          } else {
+            set_predicates_from_value(context, lhs & rhs);
+          }
+          break;
+        }
+        case Opcode::isetcc: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto pred = context.module->code.at(cursor++);
+          context.r.at(dst) = context.p.at(pred) ? 1u : 0u;
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::dadd:
+        case Opcode::dsub:
+        case Opcode::dmul:
+        case Opcode::ddiv: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto lhs = context.d.at(context.module->code.at(cursor++));
+          const auto rhs = context.d.at(context.module->code.at(cursor++));
+          double value = 0.0;
+          switch (opcode) {
+            case Opcode::dadd: value = lhs + rhs; break;
+            case Opcode::dsub: value = lhs - rhs; break;
+            case Opcode::dmul: value = lhs * rhs; break;
+            case Opcode::ddiv: value = lhs / rhs; break;
+            default: break;
+          }
+          context.d.at(dst) = value;
+          context.p[0] = (value == 0.0);
+          context.p[1] = std::signbit(value);
+          context.p[2] = false;
+          context.p[3] = false;
+          break;
+        }
+        case Opcode::dsqrt: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          context.d.at(dst) = std::sqrt(context.d.at(src));
+          context.p[0] = (context.d.at(dst) == 0.0);
+          context.p[1] = std::signbit(context.d.at(dst));
+          context.p[2] = false;
+          context.p[3] = false;
+          break;
+        }
+        case Opcode::i64tof: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          context.d.at(dst) = static_cast<double>(static_cast<std::int64_t>(context.r.at(src)));
+          context.p[0] = (context.d.at(dst) == 0.0);
+          context.p[1] = std::signbit(context.d.at(dst));
+          context.p[2] = false;
+          context.p[3] = false;
+          break;
+        }
+        case Opcode::f64toi: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          context.r.at(dst) = static_cast<std::uint64_t>(static_cast<std::int64_t>(context.d.at(src)));
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::dcmp: {
+          const auto lhs = context.d.at(context.module->code.at(cursor++));
+          const auto rhs = context.d.at(context.module->code.at(cursor++));
+          const auto diff = lhs - rhs;
+          context.p[0] = (lhs == rhs);
+          context.p[1] = diff < 0.0;
+          context.p[2] = false;
+          context.p[3] = false;
           break;
         }
         case Opcode::vadd128:
@@ -367,6 +518,84 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           context.write_vec128(resolve_address(context, base, offset), context.q.at(src));
           break;
         }
+        case Opcode::imemcpy: {
+          const auto dst_addr = context.r.at(context.module->code.at(cursor++));
+          const auto src_addr = context.r.at(context.module->code.at(cursor++));
+          const auto len = static_cast<std::size_t>(context.r.at(context.module->code.at(cursor++)));
+          for (std::size_t i = 0; i < len; ++i) {
+            context.write_memory<std::uint8_t>(dst_addr + i, context.read_memory<std::uint8_t>(src_addr + i));
+          }
+          set_predicates_from_value(context, len == 0 ? 0 : context.read_memory<std::uint8_t>(dst_addr));
+          break;
+        }
+        case Opcode::imemset: {
+          const auto dst_addr = context.r.at(context.module->code.at(cursor++));
+          const auto byte_value = static_cast<std::uint8_t>(context.r.at(context.module->code.at(cursor++)) & 0xFFu);
+          const auto len = static_cast<std::size_t>(context.r.at(context.module->code.at(cursor++)));
+          for (std::size_t i = 0; i < len; ++i) {
+            context.write_memory<std::uint8_t>(dst_addr + i, byte_value);
+          }
+          set_predicates_from_value(context, byte_value);
+          break;
+        }
+        case Opcode::istrcmp: {
+          const auto dst = context.module->code.at(cursor++);
+          auto lhs = context.r.at(context.module->code.at(cursor++));
+          auto rhs = context.r.at(context.module->code.at(cursor++));
+          std::int64_t result = 0;
+          for (;;) {
+            const auto a = context.read_memory<std::uint8_t>(lhs++);
+            const auto b = context.read_memory<std::uint8_t>(rhs++);
+            result = static_cast<std::int64_t>(a) - static_cast<std::int64_t>(b);
+            if (result != 0 || a == 0 || b == 0) break;
+          }
+          context.r.at(dst) = static_cast<std::uint64_t>(result);
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::istrlen: {
+          const auto dst = context.module->code.at(cursor++);
+          auto ptr = context.r.at(context.module->code.at(cursor++));
+          std::uint64_t len = 0;
+          while (context.read_memory<std::uint8_t>(ptr + len) != 0) ++len;
+          context.r.at(dst) = len;
+          set_predicates_from_value(context, len);
+          break;
+        }
+        case Opcode::icas64: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto base = context.module->code.at(cursor++);
+          const auto expected = context.module->code.at(cursor++);
+          const auto desired = context.module->code.at(cursor++);
+          const auto offset = read_i32(context.module->code, cursor);
+          const auto addr = resolve_address(context, base, offset);
+          const auto current = context.read_memory<std::uint64_t>(addr);
+          if (current == context.r.at(expected)) {
+            context.write_memory<std::uint64_t>(addr, context.r.at(desired));
+            context.p[0] = true;
+          } else {
+            context.p[0] = false;
+          }
+          context.r.at(dst) = current;
+          context.p[1] = static_cast<std::int64_t>(current) < 0;
+          context.p[2] = false;
+          context.p[3] = false;
+          break;
+        }
+        case Opcode::ixchg64: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto base = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          const auto offset = read_i32(context.module->code, cursor);
+          const auto addr = resolve_address(context, base, offset);
+          const auto current = context.read_memory<std::uint64_t>(addr);
+          context.write_memory<std::uint64_t>(addr, context.r.at(src));
+          context.r.at(dst) = current;
+          set_predicates_from_value(context, current);
+          break;
+        }
+        case Opcode::ifence:
+          break;
         case Opcode::jmp:
           context.pc = read_u32(context.module->code, cursor);
           control_flow_changed = true;
@@ -413,6 +642,14 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
             }
           }
           break;
+        case Opcode::bridgeargs: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto src = context.module->code.at(cursor++);
+          const auto aux = context.module->code.at(cursor++);
+          context.r.at(dst) = context.r.at(src) + context.r.at(aux);
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
         case Opcode::xcall: {
           const auto domain = context.module->code.at(cursor++);
           const auto id = read_u32(context.module->code, cursor);
@@ -457,6 +694,24 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
         case Opcode::tsrelease: {
           const auto src = context.module->code.at(cursor++);
           context.release_transient_string(context.r.at(src));
+          context.r.at(src) = 0;
+          set_predicates_from_value(context, 0);
+          break;
+        }
+        case Opcode::tsread8: {
+          const auto dst = context.module->code.at(cursor++);
+          const auto handle_reg = context.module->code.at(cursor++);
+          const auto index_reg = context.module->code.at(cursor++);
+          const auto text = context.transient_string(context.r.at(handle_reg));
+          const auto index = static_cast<std::size_t>(context.r.at(index_reg));
+          context.r.at(dst) = index < text.size() ? static_cast<std::uint8_t>(text[index]) : 0u;
+          set_predicates_from_value(context, context.r.at(dst));
+          break;
+        }
+        case Opcode::tswipe: {
+          const auto src = context.module->code.at(cursor++);
+          const auto handle = context.r.at(src);
+          context.release_transient_string(handle);
           context.r.at(src) = 0;
           set_predicates_from_value(context, 0);
           break;

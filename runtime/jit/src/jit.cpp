@@ -132,6 +132,16 @@ const char* backend_name(Vm1JitBackend backend) {
   return "off";
 }
 
+std::uint16_t read_u16(const std::vector<std::uint8_t>& code, std::size_t& pc) {
+  if (pc + 2 > code.size()) {
+    throw std::runtime_error("jit decode: truncated u16");
+  }
+  const auto value = static_cast<std::uint16_t>(code[pc]) |
+                     static_cast<std::uint16_t>(code[pc + 1] << 8u);
+  pc += 2;
+  return value;
+}
+
 std::uint32_t read_u32(const std::vector<std::uint8_t>& code, std::size_t& pc) {
   if (pc + 4 > code.size()) {
     throw std::runtime_error("jit decode: truncated u32");
@@ -148,26 +158,41 @@ std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::
   if (pc >= code.size()) {
     throw std::runtime_error("jit decode: pc out of range");
   }
-  const auto opcode = static_cast<Opcode>(code[pc]);
+  auto cursor = pc;
+  const auto opcode = static_cast<Opcode>(read_u16(code, cursor));
   switch (opcode) {
     case Opcode::nop:
-    case Opcode::breakpoint:
     case Opcode::ret:
     case Opcode::domain_ret:
-      return 1;
+    case Opcode::fence:
+    case Opcode::breakpoint:
+      return 2;
     case Opcode::trap:
     case Opcode::jmp:
-      return 1 + 4;
+    case Opcode::syscall_proxy:
+      return 6;
     case Opcode::ldi64:
     case Opcode::ldi_u64:
-      return 1 + 1 + 8;
     case Opcode::ldi_f64:
-      return 1 + 1 + 8;
+      return 11;
     case Opcode::mov:
     case Opcode::neg:
     case Opcode::bit_not:
+    case Opcode::popcnt:
+    case Opcode::clz:
+    case Opcode::ctz:
+    case Opcode::bswap:
+    case Opcode::setcc:
+    case Opcode::fsqrt:
+    case Opcode::i64_to_f64:
+    case Opcode::f64_to_i64:
+    case Opcode::strlen:
+    case Opcode::call_indirect:
+      return 4;
+    case Opcode::jmp_indirect:
     case Opcode::release_transient_string:
-      return 1 + 2;
+    case Opcode::transient_wipe:
+      return 3;
     case Opcode::add:
     case Opcode::sub:
     case Opcode::mul:
@@ -179,7 +204,21 @@ std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::
     case Opcode::shl:
     case Opcode::shr:
     case Opcode::sar:
-      return 1 + 3;
+    case Opcode::fadd:
+    case Opcode::fsub:
+    case Opcode::fmul:
+    case Opcode::fdiv:
+    case Opcode::vadd128:
+    case Opcode::vxor128:
+    case Opcode::vshuffle128:
+    case Opcode::memcpy:
+    case Opcode::memset:
+    case Opcode::strcmp:
+      return 5;
+    case Opcode::cmp:
+    case Opcode::test:
+    case Opcode::fcmp:
+      return 4;
     case Opcode::load_mem8:
     case Opcode::load_mem16:
     case Opcode::load_mem32:
@@ -188,20 +227,31 @@ std::size_t decode_instruction_size(const std::vector<std::uint8_t>& code, std::
     case Opcode::store_mem16:
     case Opcode::store_mem32:
     case Opcode::store_mem64:
-      return 1 + 1 + 1 + 4;
+    case Opcode::load_sext8:
+    case Opcode::load_sext16:
+    case Opcode::load_sext32:
+    case Opcode::lea:
+      return 8;
     case Opcode::jeq:
     case Opcode::jne:
     case Opcode::jlt:
     case Opcode::jle:
     case Opcode::jgt:
     case Opcode::jge:
-      return 1 + 1 + 1 + 4;
+      return 8;
     case Opcode::call:
-      return 1 + 4 + 1;
-    case Opcode::domain_call:
-      return 1 + 1 + 4 + 1 + 1 + 1;
     case Opcode::load_transient_string:
-      return 1 + 1 + 4;
+      return 7;
+    case Opcode::domain_call:
+      return 10;
+    case Opcode::bridge_args:
+      return 5;
+    case Opcode::transient_read8:
+      return 5;
+    case Opcode::cas_u64:
+      return 10;
+    case Opcode::xchg_u64:
+      return 9;
   }
   throw std::runtime_error("jit decode: unknown opcode");
 }
@@ -272,7 +322,8 @@ bool is_supported_x64_opcode(Opcode opcode) {
 bool block_is_x64_supported(const Vm1Module& module, std::uint32_t start_pc) {
   std::size_t pc = start_pc;
   while (pc < module.code.size()) {
-    const auto opcode = static_cast<Opcode>(module.code[pc]);
+    auto cursor = pc;
+    const auto opcode = static_cast<Opcode>(read_u16(module.code, cursor));
     if (!is_supported_x64_opcode(opcode)) {
       return false;
     }

@@ -7,7 +7,7 @@
 namespace vmp::runtime::vm2 {
 
 inline constexpr std::array<std::uint8_t, 4> kVm2Magic{{'V', 'M', 'P', '2'}};
-inline constexpr std::uint16_t kVm2Version = 1;
+inline constexpr std::uint16_t kVm2Version = 2;
 inline constexpr std::size_t kVm2GeneralRegisterCount = 32;
 inline constexpr std::size_t kVm2VectorRegisterCount = 16;
 inline constexpr std::size_t kVm2FloatRegisterCount = 8;
@@ -26,31 +26,34 @@ static_assert(sizeof(Vec128) == 16, "Vec128 must be 16 bytes");
 
 enum class Opcode : std::uint16_t {
   nop = 0x1000,
-  brk = 0x1001,
-  ftrap = 0x1002,
+  ildimm = 0x1001,
+  vldimm = 0x1002,
+  imov = 0x1003,
+  dldimm = 0x1004,
+  dmov = 0x1005,
 
-  ildimm = 0x1100,
-  vldimm = 0x1101,
-  imov = 0x1102,
+  iadd = 0x1100,
+  isub = 0x1101,
+  imul = 0x1102,
+  idiv = 0x1103,
+  imod = 0x1104,
+  ineg = 0x1105,
 
-  iadd = 0x1200,
-  isub = 0x1201,
-  imul = 0x1202,
-  idiv = 0x1203,
-  imod = 0x1204,
-  iand = 0x1205,
-  ior = 0x1206,
-  ixor = 0x1207,
-  ishl = 0x1208,
-  ishr = 0x1209,
-  isar = 0x120A,
-  ineg = 0x120B,
-  inot = 0x120C,
+  iand = 0x1200,
+  ior = 0x1201,
+  ixor = 0x1202,
+  ishl = 0x1203,
+  ishr = 0x1204,
+  isar = 0x1205,
+  inot = 0x1206,
+  ipopcnt = 0x1207,
+  iclz = 0x1208,
+  ictz = 0x1209,
+  ibswap = 0x120A,
 
-  vadd128 = 0x1300,
-  vsub128 = 0x1301,
-  vmul128 = 0x1302,
-  vxor128 = 0x1303,
+  icmp = 0x1300,
+  itest = 0x1301,
+  isetcc = 0x1302,
 
   imemld8 = 0x1400,
   imemld16 = 0x1401,
@@ -71,11 +74,41 @@ enum class Opcode : std::uint16_t {
   pcall = 0x1505,
   pret = 0x1506,
 
-  xcall = 0x1600,
-  xret = 0x1601,
+  dadd = 0x1600,
+  dsub = 0x1601,
+  dmul = 0x1602,
+  ddiv = 0x1603,
+  dsqrt = 0x1604,
+  i64tof = 0x1605,
+  f64toi = 0x1606,
+  dcmp = 0x1607,
 
-  tsload = 0x1700,
-  tsrelease = 0x1701,
+  vadd128 = 0x1700,
+  vsub128 = 0x1701,
+  vmul128 = 0x1702,
+  vxor128 = 0x1703,
+
+  imemcpy = 0x1800,
+  imemset = 0x1801,
+  istrcmp = 0x1802,
+  istrlen = 0x1803,
+
+  icas64 = 0x1900,
+  ixchg64 = 0x1901,
+  ifence = 0x1902,
+
+  brk = 0x1A00,
+  ftrap = 0x1A01,
+  syscall_proxy = 0x1A02,
+
+  xcall = 0x1B00,
+  xret = 0x1B01,
+  bridgeargs = 0x1B02,
+
+  tsload = 0x1C00,
+  tsrelease = 0x1C01,
+  tsread8 = 0x1C02,
+  tswipe = 0x1C03,
 };
 
 enum class MemoryBase : std::uint8_t {

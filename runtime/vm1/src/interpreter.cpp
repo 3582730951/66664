@@ -126,6 +126,48 @@ void compare_and_set_flags(Vm1Context& context, std::uint64_t lhs, std::uint64_t
   context.flags.overflow = flags_overflow_sub(s_lhs, s_rhs, static_cast<std::int64_t>(diff));
 }
 
+void set_float_flags(Vm1Context& context, double value) {
+  context.flags.zero = (value == 0.0);
+  context.flags.neg = std::signbit(value);
+  context.flags.carry = false;
+  context.flags.overflow = false;
+}
+
+struct VecPair {
+  std::uint64_t lo = 0;
+  std::uint64_t hi = 0;
+};
+
+VecPair read_vec_pair(const Vm1Context& context, std::uint8_t index) {
+  const auto base = static_cast<std::size_t>(index) * 2u;
+  if (base + 1 >= context.vr.size()) {
+    throw VmException(VmTrapCode::invalid_register, context.pc, "vm1: vector register out of range");
+  }
+  return {context.vr[base], context.vr[base + 1]};
+}
+
+void write_vec_pair(Vm1Context& context, std::uint8_t index, const VecPair& value) {
+  const auto base = static_cast<std::size_t>(index) * 2u;
+  if (base + 1 >= context.vr.size()) {
+    throw VmException(VmTrapCode::invalid_register, context.pc, "vm1: vector register out of range");
+  }
+  context.vr[base] = value.lo;
+  context.vr[base + 1] = value.hi;
+  set_logic_flags(context, value.lo | value.hi);
+}
+
+bool evaluate_condition_code(const Vm1Context& context, std::uint8_t cc) {
+  switch (cc) {
+    case 0: return context.flags.zero;
+    case 1: return !context.flags.zero;
+    case 2: return context.flags.neg && !context.flags.zero;
+    case 3: return context.flags.neg || context.flags.zero;
+    case 4: return !context.flags.neg && !context.flags.zero;
+    case 5: return !context.flags.neg || context.flags.zero;
+    default: return false;
+  }
+}
+
 void execute_call(Vm1Context& context, std::uint32_t target_pc, std::uint8_t arg_count, std::uint32_t return_pc) {
   const std::size_t spill_count = arg_count > 8 ? static_cast<std::size_t>(arg_count - 8) : 0u;
   const std::uint64_t new_sp = context.stack_top_;
@@ -200,7 +242,7 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
     control_flow_changed = false;
     const std::uint32_t instruction_pc = context.pc;
     std::size_t cursor = context.pc;
-    const auto opcode = static_cast<Opcode>(context.module->code[cursor++]);
+    const auto opcode = static_cast<Opcode>(read_u16(context.module->code, cursor));
     context.pc = static_cast<std::uint32_t>(cursor);
     switch (opcode) {
       case Opcode::nop:
@@ -236,10 +278,7 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
           raise_trap(context, VmTrapCode::invalid_register, "vm1: float register out of range");
         }
         context.vfr[dst] = imm;
-        context.flags.zero = (imm == 0.0);
-        context.flags.neg = std::signbit(imm);
-        context.flags.carry = false;
-        context.flags.overflow = false;
+        set_float_flags(context, imm);
         break;
       }
       case Opcode::mov: {
@@ -334,23 +373,59 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
         break;
       }
       case Opcode::neg:
-      case Opcode::bit_not: {
+      case Opcode::bit_not:
+      case Opcode::popcnt:
+      case Opcode::clz:
+      case Opcode::ctz:
+      case Opcode::bswap: {
         const auto dst = context.module->code.at(cursor++);
         const auto src = context.module->code.at(cursor++);
         std::uint64_t result = 0;
         if (opcode == Opcode::neg) {
           result = static_cast<std::uint64_t>(-static_cast<std::int64_t>(context.vr.at(src)));
-        } else {
+        } else if (opcode == Opcode::bit_not) {
           result = ~context.vr.at(src);
+        } else if (opcode == Opcode::popcnt) {
+          result = static_cast<std::uint64_t>(__builtin_popcountll(context.vr.at(src)));
+        } else if (opcode == Opcode::clz) {
+          result = context.vr.at(src) == 0 ? 64u : static_cast<std::uint64_t>(__builtin_clzll(context.vr.at(src)));
+        } else if (opcode == Opcode::ctz) {
+          result = context.vr.at(src) == 0 ? 64u : static_cast<std::uint64_t>(__builtin_ctzll(context.vr.at(src)));
+        } else if (opcode == Opcode::bswap) {
+          result = __builtin_bswap64(context.vr.at(src));
         }
         context.vr.at(dst) = result;
         set_logic_flags(context, result);
         break;
       }
+      case Opcode::cmp:
+      case Opcode::test: {
+        const auto lhs_reg = context.module->code.at(cursor++);
+        const auto rhs_reg = context.module->code.at(cursor++);
+        const auto lhs = context.vr.at(lhs_reg);
+        const auto rhs = context.vr.at(rhs_reg);
+        if (opcode == Opcode::cmp) {
+          compare_and_set_flags(context, lhs, rhs);
+        } else {
+          set_logic_flags(context, lhs & rhs);
+        }
+        break;
+      }
+      case Opcode::setcc: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto cc = context.module->code.at(cursor++);
+        context.vr.at(dst) = evaluate_condition_code(context, cc) ? 1u : 0u;
+        set_logic_flags(context, context.vr.at(dst));
+        break;
+      }
       case Opcode::load_mem8:
       case Opcode::load_mem16:
       case Opcode::load_mem32:
-      case Opcode::load_mem64: {
+      case Opcode::load_mem64:
+      case Opcode::load_sext8:
+      case Opcode::load_sext16:
+      case Opcode::load_sext32:
+      case Opcode::lea: {
         const auto dst = context.module->code.at(cursor++);
         const auto base = context.module->code.at(cursor++);
         const auto offset = read_i32(context.module->code, cursor);
@@ -360,6 +435,10 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
           case Opcode::load_mem16: context.vr.at(dst) = context.read_memory<std::uint16_t>(address); break;
           case Opcode::load_mem32: context.vr.at(dst) = context.read_memory<std::uint32_t>(address); break;
           case Opcode::load_mem64: context.vr.at(dst) = context.read_memory<std::uint64_t>(address); break;
+          case Opcode::load_sext8: context.vr.at(dst) = static_cast<std::uint64_t>(static_cast<std::int64_t>(context.read_memory<std::int8_t>(address))); break;
+          case Opcode::load_sext16: context.vr.at(dst) = static_cast<std::uint64_t>(static_cast<std::int64_t>(context.read_memory<std::int16_t>(address))); break;
+          case Opcode::load_sext32: context.vr.at(dst) = static_cast<std::uint64_t>(static_cast<std::int64_t>(context.read_memory<std::int32_t>(address))); break;
+          case Opcode::lea: context.vr.at(dst) = address; break;
           default: break;
         }
         set_logic_flags(context, context.vr.at(dst));
@@ -380,6 +459,160 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
           case Opcode::store_mem64: context.write_memory<std::uint64_t>(address, context.vr.at(src)); break;
           default: break;
         }
+        break;
+      }
+      case Opcode::fadd:
+      case Opcode::fsub:
+      case Opcode::fmul:
+      case Opcode::fdiv: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto lhs = context.module->code.at(cursor++);
+        const auto rhs = context.module->code.at(cursor++);
+        double result = 0.0;
+        if (opcode == Opcode::fadd) result = context.vfr.at(lhs) + context.vfr.at(rhs);
+        else if (opcode == Opcode::fsub) result = context.vfr.at(lhs) - context.vfr.at(rhs);
+        else if (opcode == Opcode::fmul) result = context.vfr.at(lhs) * context.vfr.at(rhs);
+        else {
+          if (context.vfr.at(rhs) == 0.0) raise_trap(context, VmTrapCode::divide_by_zero, "vm1: float divide by zero");
+          result = context.vfr.at(lhs) / context.vfr.at(rhs);
+        }
+        context.vfr.at(dst) = result;
+        set_float_flags(context, result);
+        break;
+      }
+      case Opcode::fsqrt: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto src = context.module->code.at(cursor++);
+        context.vfr.at(dst) = std::sqrt(context.vfr.at(src));
+        set_float_flags(context, context.vfr.at(dst));
+        break;
+      }
+      case Opcode::i64_to_f64: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto src = context.module->code.at(cursor++);
+        context.vfr.at(dst) = static_cast<double>(static_cast<std::int64_t>(context.vr.at(src)));
+        set_float_flags(context, context.vfr.at(dst));
+        break;
+      }
+      case Opcode::f64_to_i64: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto src = context.module->code.at(cursor++);
+        context.vr.at(dst) = static_cast<std::uint64_t>(static_cast<std::int64_t>(context.vfr.at(src)));
+        set_logic_flags(context, context.vr.at(dst));
+        break;
+      }
+      case Opcode::fcmp: {
+        const auto lhs = context.module->code.at(cursor++);
+        const auto rhs = context.module->code.at(cursor++);
+        const auto diff = context.vfr.at(lhs) - context.vfr.at(rhs);
+        set_float_flags(context, diff);
+        break;
+      }
+      case Opcode::vadd128:
+      case Opcode::vxor128:
+      case Opcode::vshuffle128: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto lhs = context.module->code.at(cursor++);
+        const auto rhs = context.module->code.at(cursor++);
+        auto left = read_vec_pair(context, lhs);
+        auto right = read_vec_pair(context, rhs);
+        VecPair out{};
+        if (opcode == Opcode::vadd128) {
+          out.lo = left.lo + right.lo;
+          out.hi = left.hi + right.hi;
+        } else if (opcode == Opcode::vxor128) {
+          out.lo = left.lo ^ right.lo;
+          out.hi = left.hi ^ right.hi;
+        } else {
+          out.lo = left.hi;
+          out.hi = right.lo;
+        }
+        write_vec_pair(context, dst, out);
+        break;
+      }
+      case Opcode::memcpy:
+      case Opcode::memset:
+      case Opcode::strcmp: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto lhs = context.module->code.at(cursor++);
+        const auto rhs = context.module->code.at(cursor++);
+        if (opcode == Opcode::memcpy) {
+          const auto dest = context.vr.at(dst);
+          const auto src = context.vr.at(lhs);
+          const auto len = static_cast<std::size_t>(context.vr.at(rhs));
+          for (std::size_t i = 0; i < len; ++i) context.write_memory<std::uint8_t>(dest + i, context.read_memory<std::uint8_t>(src + i));
+          set_logic_flags(context, len);
+        } else if (opcode == Opcode::memset) {
+          const auto dest = context.vr.at(dst);
+          const auto value = static_cast<std::uint8_t>(context.vr.at(lhs));
+          const auto len = static_cast<std::size_t>(context.vr.at(rhs));
+          for (std::size_t i = 0; i < len; ++i) context.write_memory<std::uint8_t>(dest + i, value);
+          set_logic_flags(context, len);
+        } else {
+          const auto a = context.vr.at(dst);
+          const auto b = context.vr.at(lhs);
+          std::int64_t cmp_result = 0;
+          std::size_t i = 0;
+          for (;; ++i) {
+            const auto av = context.read_memory<std::uint8_t>(a + i);
+            const auto bv = context.read_memory<std::uint8_t>(b + i);
+            if (av != bv || av == 0 || bv == 0) {
+              cmp_result = static_cast<std::int64_t>(av) - static_cast<std::int64_t>(bv);
+              break;
+            }
+          }
+          context.vr.at(rhs) = static_cast<std::uint64_t>(cmp_result);
+          set_logic_flags(context, context.vr.at(rhs));
+        }
+        break;
+      }
+      case Opcode::strlen: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto src = context.module->code.at(cursor++);
+        std::size_t len = 0;
+        while (context.read_memory<std::uint8_t>(context.vr.at(src) + len) != 0) ++len;
+        context.vr.at(dst) = len;
+        set_logic_flags(context, len);
+        break;
+      }
+      case Opcode::cas_u64: {
+        const auto base = context.module->code.at(cursor++);
+        const auto dst = context.module->code.at(cursor++);
+        const auto offset = read_i32(context.module->code, cursor);
+        const auto expected = context.module->code.at(cursor++);
+        const auto desired = context.module->code.at(cursor++);
+        const auto address = resolve_address(context, base, offset);
+        const auto old = context.read_memory<std::uint64_t>(address);
+        if (old == context.vr.at(expected)) context.write_memory<std::uint64_t>(address, context.vr.at(desired));
+        context.vr.at(dst) = old;
+        compare_and_set_flags(context, old, context.vr.at(expected));
+        break;
+      }
+      case Opcode::xchg_u64: {
+        const auto base = context.module->code.at(cursor++);
+        const auto dst = context.module->code.at(cursor++);
+        const auto offset = read_i32(context.module->code, cursor);
+        const auto src = context.module->code.at(cursor++);
+        const auto address = resolve_address(context, base, offset);
+        const auto old = context.read_memory<std::uint64_t>(address);
+        context.write_memory<std::uint64_t>(address, context.vr.at(src));
+        context.vr.at(dst) = old;
+        set_logic_flags(context, old);
+        break;
+      }
+      case Opcode::syscall_proxy: {
+        const auto code = read_u32(context.module->code, cursor);
+        dispatch_audit(context, "vm1_syscall_proxy", "syscall_proxy=" + std::to_string(code));
+        context.vr[0] = 0;
+        set_logic_flags(context, 0);
+        break;
+      }
+      case Opcode::bridge_args: {
+        const auto ic = context.module->code.at(cursor++);
+        const auto fc = context.module->code.at(cursor++);
+        const auto oc = context.module->code.at(cursor++);
+        context.vr[31] = (static_cast<std::uint64_t>(ic) << 16u) | (static_cast<std::uint64_t>(fc) << 8u) | oc;
+        set_logic_flags(context, context.vr[31]);
         break;
       }
       case Opcode::jmp: {
@@ -418,6 +651,19 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
         const auto target = read_u32(context.module->code, cursor);
         const auto arg_count = context.module->code.at(cursor++);
         execute_call(context, target, arg_count, static_cast<std::uint32_t>(cursor));
+        control_flow_changed = true;
+        break;
+      }
+      case Opcode::call_indirect: {
+        const auto target_reg = context.module->code.at(cursor++);
+        const auto arg_count = context.module->code.at(cursor++);
+        execute_call(context, static_cast<std::uint32_t>(context.vr.at(target_reg)), arg_count, static_cast<std::uint32_t>(cursor));
+        control_flow_changed = true;
+        break;
+      }
+      case Opcode::jmp_indirect: {
+        const auto target_reg = context.module->code.at(cursor++);
+        context.pc = static_cast<std::uint32_t>(context.vr.at(target_reg));
         control_flow_changed = true;
         break;
       }
@@ -478,6 +724,25 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
       case Opcode::release_transient_string: {
         const auto src = context.module->code.at(cursor++);
         context.release_transient_string(context.vr.at(src));
+        context.vr.at(src) = 0;
+        set_logic_flags(context, 0);
+        break;
+      }
+      case Opcode::transient_read8: {
+        const auto dst = context.module->code.at(cursor++);
+        const auto handle = context.module->code.at(cursor++);
+        const auto index = context.module->code.at(cursor++);
+        const auto value = context.transient_string(context.vr.at(handle));
+        const auto idx = static_cast<std::size_t>(context.vr.at(index));
+        context.vr.at(dst) = idx < value.size() ? static_cast<std::uint8_t>(value[idx]) : 0u;
+        set_logic_flags(context, context.vr.at(dst));
+        break;
+      }
+      case Opcode::transient_wipe: {
+        const auto src = context.module->code.at(cursor++);
+        if (context.vr.at(src) != 0) {
+          context.release_transient_string(context.vr.at(src));
+        }
         context.vr.at(src) = 0;
         set_logic_flags(context, 0);
         break;

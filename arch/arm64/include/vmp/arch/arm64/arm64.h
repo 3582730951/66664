@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vmp/arch/common/lifting.h>
+#include <vmp/arch/arm64/ir.h>
 
 namespace vmp::arch::arm64 {
 
