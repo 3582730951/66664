@@ -38,6 +38,19 @@ void push_operand(InstructionIR& ir, const std::string& text, OperandKind kind, 
   if (kind == OperandKind::imm) ir.immediate_values.push_back(imm);
 }
 
+void set_pc_relative(InstructionIR& ir,
+                     std::uint64_t source_pc,
+                     std::int64_t displacement,
+                     common::PcRelativeTarget::Kind kind,
+                     std::optional<std::uint64_t> absolute_override = std::nullopt) {
+  ir.pc_relative_target = common::PcRelativeTarget{
+      source_pc,
+      displacement,
+      absolute_override.value_or(static_cast<std::uint64_t>(static_cast<std::int64_t>(source_pc) + displacement)),
+      kind,
+  };
+}
+
 std::string mem_text(const MemoryAddress& mem) {
   std::ostringstream oss;
   if (mem.pre_index) oss << '[';
@@ -68,10 +81,11 @@ InstructionIR decode_impl(const std::vector<std::uint8_t>& bytes, std::uint64_t 
   const auto rm = static_cast<std::uint8_t>((word >> 16) & 0x1Fu);
   const bool is64 = ((word >> 31) & 1u) != 0u;
 
-  auto set_rel = [&](std::int64_t rel) {
+  auto set_rel = [&](std::int64_t rel, common::PcRelativeTarget::Kind kind) {
     ir.relative_target = static_cast<std::uint64_t>(static_cast<std::int64_t>(address) + rel);
     ir.has_relative_target = true;
     push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 8, ir.relative_target);
+    set_pc_relative(ir, address, rel, kind);
   };
 
   if ((word & 0x1F000000u) == 0x10000000u) {
@@ -79,27 +93,47 @@ InstructionIR decode_impl(const std::vector<std::uint8_t>& bytes, std::uint64_t 
     std::int64_t imm = ((static_cast<std::int64_t>((word >> 5) & 0x7FFFFu) << 2) | ((word >> 29) & 0x3u));
     if (imm & (1ll << 20)) imm |= ~((1ll << 21) - 1);
     push_operand(ir, xreg(rd), OperandKind::reg, is64 ? 8 : 4);
-    set_rel(ir.mnemonic == "adrp" ? (imm << 12) : imm);
+    if (ir.mnemonic == "adrp") {
+      const auto displacement = imm << 12;
+      const auto absolute = static_cast<std::uint64_t>(static_cast<std::int64_t>(address & ~0xFFFull) + displacement);
+      ir.relative_target = absolute;
+      ir.has_relative_target = true;
+      push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 8, ir.relative_target);
+      set_pc_relative(ir, address, displacement, common::PcRelativeTarget::Kind::address_materialize, absolute);
+    } else {
+      set_rel(imm, common::PcRelativeTarget::Kind::address_materialize);
+    }
   } else if ((word & 0x7C000000u) == 0x14000000u) {
     ir.mnemonic = ((word >> 31) & 1u) ? "bl" : "b";
     std::int64_t imm = static_cast<std::int32_t>((word & 0x03FFFFFFu) << 6) >> 4;
-    set_rel(imm);
+    set_rel(imm, ((word >> 31) & 1u) ? common::PcRelativeTarget::Kind::call
+                                      : common::PcRelativeTarget::Kind::branch);
   } else if ((word & 0xFF000010u) == 0x54000000u) {
     ir.mnemonic = "b.cond";
     ir.condition = static_cast<ConditionCode>(word & 0xFu);
     std::int64_t imm = static_cast<std::int32_t>(((word >> 5) & 0x7FFFFu) << 13) >> 11;
-    set_rel(imm);
+    set_rel(imm, common::PcRelativeTarget::Kind::branch);
   } else if ((word & 0x7E000000u) == 0x34000000u) {
     ir.mnemonic = ((word >> 24) & 1u) ? "cbnz" : "cbz";
     push_operand(ir, xreg(rd, is64), OperandKind::reg, is64 ? 8 : 4);
     std::int64_t imm = static_cast<std::int32_t>(((word >> 5) & 0x7FFFFu) << 13) >> 11;
-    set_rel(imm);
+    set_rel(imm, common::PcRelativeTarget::Kind::branch);
   } else if ((word & 0x7E000000u) == 0x36000000u) {
     ir.mnemonic = ((word >> 24) & 1u) ? "tbnz" : "tbz";
     push_operand(ir, xreg(rd), OperandKind::reg, is64 ? 8 : 4);
     push_operand(ir, std::to_string((word >> 19) & 0x3Fu), OperandKind::imm, 1, (word >> 19) & 0x3Fu);
     std::int64_t imm = static_cast<std::int32_t>(((word >> 5) & 0x3FFFu) << 18) >> 16;
-    set_rel(imm);
+    set_rel(imm, common::PcRelativeTarget::Kind::branch);
+  } else if ((word & 0x3B000000u) == 0x18000000u) {
+    ir.mnemonic = "ldr";
+    const auto displacement = static_cast<std::int32_t>(((word >> 5) & 0x7FFFFu) << 13) >> 11;
+    const bool literal_is64 = (((word >> 30) & 0x3u) == 1u);
+    push_operand(ir, xreg(rd, literal_is64), OperandKind::reg, literal_is64 ? 8 : 4);
+    push_operand(ir, "[pc,#" + std::to_string(displacement) + "]", OperandKind::mem, literal_is64 ? 8 : 4);
+    ir.memory.valid = true;
+    ir.memory.base = 0xFFu;
+    ir.memory.displacement = displacement;
+    set_pc_relative(ir, address, displacement, common::PcRelativeTarget::Kind::load);
   } else if ((word & 0xFFFFFC1Fu) == 0xD65F0000u) {
     ir.mnemonic = "ret";
     push_operand(ir, xreg(rn), OperandKind::reg, 8);

@@ -2,7 +2,12 @@
 
 - 支持 ABI：`sysv_x64`、`msvc_x64`
 - 发射域：默认 VM1；构造 `X64Lifter(TargetDomain::vm2)` 时发射 VM2
-- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target, flags }`
+- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target, pc_relative_target, flags }`
+- PC-relative：
+  - `jmp/call/jcc`：`pc_relative_target.kind=branch/call`，`source_pc=next RIP`
+  - `rip+disp32` 访存：按 `load/store/address_materialize` 分类
+  - `ff /2` / `ff /4` 的 RIP-relative table jump/call：`kind=indirect_jump_via_table`
+  - `lea rip+X` 在 lifter 中优先发射 VM label-form `ldi_u64/ildimm @label`
 - 已验证指令族：
   - 整数/位运算：`mov/movsx/movzx/movsxd/add/sub/and/or/xor/cmp/test/imul/bsf/bsr/tzcnt/lzcnt/bt/bts/btr/btc`
   - 移位旋转：`rol/ror/rcl/rcr/shl/shr/sal/sar`

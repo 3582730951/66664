@@ -633,6 +633,30 @@ set_target_properties(arm_lift_basic PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE
 add_test(NAME arm_lift_basic COMMAND $<TARGET_FILE:arm_lift_basic>)
 set_tests_properties(arm_lift_basic PROPERTIES PASS_REGULAR_EXPRESSION "arm_lift_basic OK")
 
+add_executable(pc_relative_x64 ${CMAKE_CURRENT_SOURCE_DIR}/arch/pc_relative_x64.cpp)
+target_link_libraries(pc_relative_x64 PRIVATE vmp_arch_x64 vmp_runtime_vm1 vmp_runtime_vm2)
+set_target_properties(pc_relative_x64 PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME pc_relative_x64 COMMAND $<TARGET_FILE:pc_relative_x64>)
+set_tests_properties(pc_relative_x64 PROPERTIES PASS_REGULAR_EXPRESSION "pc_relative_x64 OK")
+
+add_executable(pc_relative_x86 ${CMAKE_CURRENT_SOURCE_DIR}/arch/pc_relative_x86.cpp)
+target_link_libraries(pc_relative_x86 PRIVATE vmp_arch_x86 vmp_runtime_vm1)
+set_target_properties(pc_relative_x86 PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME pc_relative_x86 COMMAND $<TARGET_FILE:pc_relative_x86>)
+set_tests_properties(pc_relative_x86 PROPERTIES PASS_REGULAR_EXPRESSION "pc_relative_x86 OK")
+
+add_executable(pc_relative_arm ${CMAKE_CURRENT_SOURCE_DIR}/arch/pc_relative_arm.cpp)
+target_link_libraries(pc_relative_arm PRIVATE vmp_arch_arm vmp_runtime_vm1)
+set_target_properties(pc_relative_arm PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME pc_relative_arm COMMAND $<TARGET_FILE:pc_relative_arm>)
+set_tests_properties(pc_relative_arm PROPERTIES PASS_REGULAR_EXPRESSION "pc_relative_arm OK")
+
+add_executable(pc_relative_arm64 ${CMAKE_CURRENT_SOURCE_DIR}/arch/pc_relative_arm64.cpp)
+target_link_libraries(pc_relative_arm64 PRIVATE vmp_arch_arm64 vmp_runtime_vm1)
+set_target_properties(pc_relative_arm64 PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_test(NAME pc_relative_arm64 COMMAND $<TARGET_FILE:pc_relative_arm64>)
+set_tests_properties(pc_relative_arm64 PROPERTIES PASS_REGULAR_EXPRESSION "pc_relative_arm64 OK")
+
 add_executable(arm64_lift_basic ${CMAKE_CURRENT_SOURCE_DIR}/arch/arm64_lift_basic.cpp)
 target_link_libraries(arm64_lift_basic PRIVATE vmp_arch_arm64 vmp_runtime_vm1)
 set_target_properties(arm64_lift_basic PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)

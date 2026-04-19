@@ -20,6 +20,17 @@ std::string reg_name(std::uint8_t reg) { std::ostringstream oss; oss << (reg == 
 void push_operand(InstructionIR& ir, const std::string& text, OperandKind kind, std::uint8_t size, std::uint64_t imm = 0) {
   ir.operands.push_back(text); ir.operand_kinds.push_back(kind); ir.operand_sizes.push_back(size); if (kind == OperandKind::imm) ir.immediate_values.push_back(imm);
 }
+void set_pc_relative(InstructionIR& ir,
+                     std::uint64_t source_pc,
+                     std::int64_t displacement,
+                     common::PcRelativeTarget::Kind kind) {
+  ir.pc_relative_target = common::PcRelativeTarget{
+      source_pc,
+      displacement,
+      static_cast<std::uint64_t>(static_cast<std::int64_t>(source_pc) + displacement),
+      kind,
+  };
+}
 std::string mem_text(const MemoryAddress& mem) {
   std::ostringstream oss; oss << '[' << reg_name(mem.base); if (mem.index != 0xFFu) oss << ", " << reg_name(mem.index); else if (mem.displacement != 0) oss << ", #" << mem.displacement; oss << ']'; if (mem.post_index) oss << ", #" << mem.displacement; else if (!mem.pre_index) oss << '!'; return oss.str();
 }
@@ -30,15 +41,29 @@ InstructionIR decode_arm_word(const std::vector<std::uint8_t>& bytes, std::uint6
   const auto rd = static_cast<std::uint8_t>((w >> 12) & 0xFu);
   const auto rn = static_cast<std::uint8_t>((w >> 16) & 0xFu);
   const auto rm = static_cast<std::uint8_t>(w & 0xFu);
-  if ((w & 0x0E000000u) == 0x0A000000u) {
+  const auto arm_pc = address + 8;
+  if ((w & 0xFE000000u) == 0xFA000000u) {
+    ir.mnemonic = "blx";
+    std::int32_t displacement = static_cast<std::int32_t>(((w & 0x00FFFFFFu) << 2) | (((w >> 24) & 1u) << 1));
+    if ((displacement & 0x02000000) != 0) displacement |= ~0x03FFFFFF;
+    ir.relative_target = arm_pc + displacement;
+    ir.has_relative_target = true;
+    push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 4, ir.relative_target);
+    set_pc_relative(ir, arm_pc, displacement, common::PcRelativeTarget::Kind::call);
+  } else if ((w & 0x0E000000u) == 0x0A000000u) {
     ir.mnemonic = ((w >> 24) & 1u) ? "bl" : "b";
     std::int32_t imm24 = w & 0xFFFFFFu; if (imm24 & 0x800000) imm24 |= ~0xFFFFFF;
-    ir.relative_target = address + 8 + (static_cast<std::int64_t>(imm24) << 2);
+    const auto displacement = static_cast<std::int64_t>(imm24) << 2;
+    ir.relative_target = arm_pc + displacement;
     ir.has_relative_target = true; push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 4, ir.relative_target);
+    set_pc_relative(ir, arm_pc, displacement, ((w >> 24) & 1u) ? common::PcRelativeTarget::Kind::call
+                                                                : common::PcRelativeTarget::Kind::branch);
   } else if ((w & 0x0FFFFFF0u) == 0x012FFF10u) {
     ir.mnemonic = "bx"; push_operand(ir, reg_name(rm), OperandKind::reg, 4);
+    set_pc_relative(ir, arm_pc, 0, common::PcRelativeTarget::Kind::indirect_jump_via_table);
   } else if ((w & 0x0FFFFFF0u) == 0x012FFF30u) {
     ir.mnemonic = "blx"; push_operand(ir, reg_name(rm), OperandKind::reg, 4);
+    set_pc_relative(ir, arm_pc, 0, common::PcRelativeTarget::Kind::indirect_jump_via_table);
   } else if ((w & 0x0FC000F0u) == 0x00000090u) {
     ir.mnemonic = ((w >> 21) & 1u) ? "mla" : "mul"; push_operand(ir, reg_name(rd), OperandKind::reg, 4); push_operand(ir, reg_name(rm), OperandKind::reg, 4); push_operand(ir, reg_name(static_cast<std::uint8_t>((w >> 8) & 0xFu)), OperandKind::reg, 4);
   } else if ((w & 0x0FF0F0F0u) == 0x0710F010u || (w & 0x0FF0F0F0u) == 0x0730F010u) {
@@ -47,7 +72,12 @@ InstructionIR decode_arm_word(const std::vector<std::uint8_t>& bytes, std::uint6
     const auto div_rn = static_cast<std::uint8_t>(w & 0xFu);
     ir.mnemonic = ((w & 0x00200000u) != 0u) ? "udiv" : "sdiv"; push_operand(ir, reg_name(div_rd), OperandKind::reg, 4); push_operand(ir, reg_name(div_rn), OperandKind::reg, 4); push_operand(ir, reg_name(div_rm), OperandKind::reg, 4);
   } else if ((w & 0x0C000000u) == 0x04000000u) {
-    ir.mnemonic = ((w >> 20) & 1u) ? "ldr" : "str"; ir.memory.valid = true; ir.memory.base = rn; ir.memory.displacement = w & 0xFFFu; ir.memory.pre_index = ((w >> 24) & 1u) != 0; ir.memory.post_index = ((w >> 24) & 1u) == 0; if ((w & (1u << 25)) != 0u) ir.memory.index = rm; if (ir.mnemonic == "ldr") push_operand(ir, reg_name(rd), OperandKind::reg, 4); push_operand(ir, mem_text(ir.memory), OperandKind::mem, 4); if (ir.mnemonic == "str") { ir.operands.insert(ir.operands.begin(), reg_name(rd)); ir.operand_kinds.insert(ir.operand_kinds.begin(), OperandKind::reg); ir.operand_sizes.insert(ir.operand_sizes.begin(), 4); }
+    ir.mnemonic = ((w >> 20) & 1u) ? "ldr" : "str"; ir.memory.valid = true; ir.memory.base = rn; ir.memory.displacement = ((w >> 23) & 1u) ? static_cast<std::int64_t>(w & 0xFFFu) : -static_cast<std::int64_t>(w & 0xFFFu); ir.memory.pre_index = ((w >> 24) & 1u) != 0; ir.memory.post_index = ((w >> 24) & 1u) == 0; if ((w & (1u << 25)) != 0u) ir.memory.index = rm; if (ir.mnemonic == "ldr") push_operand(ir, reg_name(rd), OperandKind::reg, 4); push_operand(ir, mem_text(ir.memory), OperandKind::mem, 4); if (ir.mnemonic == "str") { ir.operands.insert(ir.operands.begin(), reg_name(rd)); ir.operand_kinds.insert(ir.operand_kinds.begin(), OperandKind::reg); ir.operand_sizes.insert(ir.operand_sizes.begin(), 4); }
+    if (rn == 15u && ir.memory.index == 0xFFu) {
+      const auto kind = ir.mnemonic == "ldr" ? common::PcRelativeTarget::Kind::load
+                                             : common::PcRelativeTarget::Kind::store;
+      set_pc_relative(ir, arm_pc, ir.memory.displacement, kind);
+    }
   } else if ((w & 0x0E000000u) == 0x08000000u) {
     ir.mnemonic = ((w >> 20) & 1u) ? "ldm" : "stm"; ir.memory.valid = true; ir.memory.base = rn; push_operand(ir, reg_name(rn), OperandKind::reg, 4); push_operand(ir, std::to_string(w & 0xFFFFu), OperandKind::imm, 4, w & 0xFFFFu);
   } else if ((w & 0x0FB00FF0u) == 0x01000090u) {
@@ -71,6 +101,9 @@ InstructionIR decode_arm_word(const std::vector<std::uint8_t>& bytes, std::uint6
       push_operand(ir, reg_name(rd), OperandKind::reg, 4);
       if (immediate) push_operand(ir, std::to_string((w & 0xFFu)), OperandKind::imm, 4, w & 0xFFu);
       else push_operand(ir, reg_name(rm), OperandKind::reg, 4);
+      if (opcode == 13 && rd == 15u && !immediate) {
+        set_pc_relative(ir, arm_pc, 0, common::PcRelativeTarget::Kind::indirect_jump_via_table);
+      }
     } else if (opcode >= 8 && opcode <= 11) {
       push_operand(ir, reg_name(rn), OperandKind::reg, 4);
       if (immediate) push_operand(ir, std::to_string((w & 0xFFu)), OperandKind::imm, 4, w & 0xFFu);
@@ -93,10 +126,20 @@ InstructionIR decode_arm_word(const std::vector<std::uint8_t>& bytes, std::uint6
 InstructionIR decode_thumb(const std::vector<std::uint8_t>& bytes, std::uint64_t address) {
   const auto h0 = read_u16le(bytes, 0);
   InstructionIR ir; ir.address = address; ir.mode = ExecutionMode::thumb; ir.can_reencode = true;
+  const auto thumb_pc = address + 4;
+  const auto thumb_aligned_pc = thumb_pc & ~0x3ull;
   if ((h0 & 0xF800u) == 0x1800u) { ir.size = 2; ir.encoding.assign(bytes.begin(), bytes.begin() + 2); ir.mnemonic = "add"; push_operand(ir, reg_name((h0 & 7u)), OperandKind::reg, 4); push_operand(ir, reg_name((h0 >> 3) & 7u), OperandKind::reg, 4); push_operand(ir, reg_name((h0 >> 6) & 7u), OperandKind::reg, 4); }
-  else if ((h0 & 0xF500u) == 0xB100u) { ir.size = 2; ir.encoding.assign(bytes.begin(), bytes.begin() + 2); ir.mnemonic = (h0 & 0x0800u) ? "cbnz" : "cbz"; push_operand(ir, reg_name((h0 >> 0) & 7u), OperandKind::reg, 4); std::int32_t imm = (((h0 >> 3) & 0x1Fu) | ((h0 >> 9) & 0x20u)) << 1; ir.relative_target = address + 4 + imm; ir.has_relative_target = true; push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 4, ir.relative_target); }
-  else if ((h0 & 0xF800u) == 0xE000u) { ir.size = 2; ir.encoding.assign(bytes.begin(), bytes.begin() + 2); ir.mnemonic = "b"; std::int32_t imm = static_cast<std::int16_t>((h0 & 0x7FFu) << 5) >> 4; ir.relative_target = address + 4 + imm; ir.has_relative_target = true; push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 4, ir.relative_target); }
-  else if ((h0 & 0xF800u) == 0x4800u) { ir.size = 2; ir.encoding.assign(bytes.begin(), bytes.begin() + 2); ir.mnemonic = "ldr"; push_operand(ir, reg_name((h0 >> 8) & 7u), OperandKind::reg, 4); push_operand(ir, "[pc,#" + std::to_string((h0 & 0xFFu) << 2) + "]", OperandKind::mem, 4); }
+  else if ((h0 & 0xF500u) == 0xB100u) { ir.size = 2; ir.encoding.assign(bytes.begin(), bytes.begin() + 2); ir.mnemonic = (h0 & 0x0800u) ? "cbnz" : "cbz"; push_operand(ir, reg_name((h0 >> 0) & 7u), OperandKind::reg, 4); std::int32_t imm = (((h0 >> 3) & 0x1Fu) | ((h0 >> 9) & 0x20u)) << 1; ir.relative_target = thumb_pc + imm; ir.has_relative_target = true; push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 4, ir.relative_target); set_pc_relative(ir, thumb_pc, imm, common::PcRelativeTarget::Kind::branch); }
+  else if ((h0 & 0xF800u) == 0xE000u) { ir.size = 2; ir.encoding.assign(bytes.begin(), bytes.begin() + 2); ir.mnemonic = "b"; std::int32_t imm = static_cast<std::int16_t>((h0 & 0x7FFu) << 5) >> 4; ir.relative_target = thumb_pc + imm; ir.has_relative_target = true; push_operand(ir, std::to_string(ir.relative_target), OperandKind::label, 4, ir.relative_target); set_pc_relative(ir, thumb_pc, imm, common::PcRelativeTarget::Kind::branch); }
+  else if ((h0 & 0xF800u) == 0x4800u) { ir.size = 2; ir.encoding.assign(bytes.begin(), bytes.begin() + 2); ir.mnemonic = "ldr"; const auto displacement = static_cast<std::int64_t>((h0 & 0xFFu) << 2); push_operand(ir, reg_name((h0 >> 8) & 7u), OperandKind::reg, 4); push_operand(ir, "[pc,#" + std::to_string(displacement) + "]", OperandKind::mem, 4); set_pc_relative(ir, thumb_aligned_pc, displacement, common::PcRelativeTarget::Kind::load); }
+  else if (bytes.size() >= 4) {
+    const auto h1 = read_u16le(bytes, 2);
+    if ((h0 & 0xFFF0u) == 0xE8D0u && (h1 & 0xFFF0u) == 0xF000u) {
+      ir.size = 4; ir.encoding.assign(bytes.begin(), bytes.begin() + 4); ir.mnemonic = "tbb"; push_operand(ir, "[pc, " + reg_name(h1 & 0xFu) + "]", OperandKind::mem, 4); set_pc_relative(ir, thumb_aligned_pc, 0, common::PcRelativeTarget::Kind::indirect_jump_via_table);
+    } else if ((h0 & 0xFFF0u) == 0xE8D0u && (h1 & 0xFFF0u) == 0xF010u) {
+      ir.size = 4; ir.encoding.assign(bytes.begin(), bytes.begin() + 4); ir.mnemonic = "tbh"; push_operand(ir, "[pc, " + reg_name(h1 & 0xFu) + ", lsl #1]", OperandKind::mem, 4); set_pc_relative(ir, thumb_aligned_pc, 0, common::PcRelativeTarget::Kind::indirect_jump_via_table);
+    } else { ir.size = ((h0 & 0xE000u) == 0xE000u || (h0 & 0xF800u) == 0xF000u) ? 4 : 2; ir.encoding.assign(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(ir.size)); ir.mnemonic = "opaque"; ir.can_reencode = false; ir.skip_reason = "SKIP_REASON=thumb decode-only fallback retained original bytes."; }
+  }
   else { ir.size = ((h0 & 0xE000u) == 0xE000u || (h0 & 0xF800u) == 0xF000u) ? 4 : 2; ir.encoding.assign(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(ir.size)); ir.mnemonic = "opaque"; ir.can_reencode = false; ir.skip_reason = "SKIP_REASON=thumb decode-only fallback retained original bytes."; }
   return ir;
 }

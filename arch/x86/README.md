@@ -2,7 +2,11 @@
 
 - 支持 ABI：`cdecl_x86`、`stdcall_x86`
 - 发射域：VM1
-- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target, flags }`
+- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target, pc_relative_target, flags }`
+- PC-relative：
+  - `jmp/call/jcc/loop/loope/loopne/jecxz`：统一填充 `pc_relative_target`
+  - `ff 25` / `ff 15` 的 disp32 table 入口：保守解释为 `source_pc=0`、`displacement==computed_absolute==table_entry`
+  - lifter 当前对控制流 label-form 生效；table-indirect 语义继续由后续子任务扩展
 - 已验证指令族：
   - 整数：`mov/movsx/movzx/add/or/adc/sbb/and/sub/xor/cmp/test/imul/bsf/bsr`
   - 移位旋转：`rol/ror/rcl/rcr/shl/shr/sal/sar`

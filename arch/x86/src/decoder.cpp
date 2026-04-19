@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace vmp::arch::x86 {
 namespace common = vmp::arch::common;
@@ -81,6 +82,18 @@ const char* group2_name(std::uint8_t sub) {
   }
 }
 
+void set_pc_relative(InstructionIR& ir,
+                     std::uint64_t source_pc,
+                     std::int64_t displacement,
+                     common::PcRelativeTarget::Kind kind) {
+  ir.pc_relative_target = common::PcRelativeTarget{
+      source_pc,
+      displacement,
+      static_cast<std::uint64_t>(static_cast<std::int64_t>(source_pc) + displacement),
+      kind,
+  };
+}
+
 std::string mem_text(const MemoryAddress& mem) {
   std::ostringstream oss;
   oss << '[';
@@ -123,11 +136,12 @@ InstructionIR decode_impl(const std::vector<std::uint8_t>& bytes, std::uint64_t 
     ir.can_reencode = true;
     return ir;
   };
-  auto rel = [&](std::size_t w) {
+  auto rel = [&](std::size_t w, common::PcRelativeTarget::Kind kind) {
     auto imm = read_imm(bytes, cur.off, w);
     auto s = w == 1 ? static_cast<std::int8_t>(imm) : static_cast<std::int32_t>(imm);
     ir.relative_target = address + cur.off + s;
     ir.has_relative_target = true;
+    set_pc_relative(ir, address + cur.off, s, kind);
     push_operand(ir, std::to_string(ir.relative_target), OperandKind::imm, 4, ir.relative_target);
   };
   auto modrm_rr = [&](const char* mnemonic, bool reg_dst, bool simd = false) {
@@ -180,9 +194,13 @@ InstructionIR decode_impl(const std::vector<std::uint8_t>& bytes, std::uint64_t 
     case 0x39: modrm_rr("cmp", false); break;
     case 0x3B: modrm_rr("cmp", true); break;
     case 0x85: modrm_rr("test", false); break;
-    case 0xE8: ir.mnemonic = "call"; rel(4); break;
-    case 0xE9: ir.mnemonic = "jmp"; rel(4); break;
-    case 0xEB: ir.mnemonic = "jmp"; rel(1); break;
+    case 0xE8: ir.mnemonic = "call"; rel(4, common::PcRelativeTarget::Kind::call); break;
+    case 0xE9: ir.mnemonic = "jmp"; rel(4, common::PcRelativeTarget::Kind::branch); break;
+    case 0xEB: ir.mnemonic = "jmp"; rel(1, common::PcRelativeTarget::Kind::branch); break;
+    case 0xE0: ir.mnemonic = "loopne"; rel(1, common::PcRelativeTarget::Kind::branch); break;
+    case 0xE1: ir.mnemonic = "loope"; rel(1, common::PcRelativeTarget::Kind::branch); break;
+    case 0xE2: ir.mnemonic = "loop"; rel(1, common::PcRelativeTarget::Kind::branch); break;
+    case 0xE3: ir.mnemonic = "jecxz"; rel(1, common::PcRelativeTarget::Kind::branch); break;
     case 0xC3: ir.mnemonic = "ret"; break;
     case 0x68: ir.mnemonic = "push"; push_operand(ir, std::to_string(read_imm(bytes, cur.off, 4)), OperandKind::imm, 4); break;
     case 0x6A: ir.mnemonic = "push"; push_operand(ir, std::to_string(read_imm(bytes, cur.off, 1)), OperandKind::imm, 1); break;
@@ -274,6 +292,14 @@ InstructionIR decode_impl(const std::vector<std::uint8_t>& bytes, std::uint64_t 
         const auto mem = decode_memory(cur, mod, rm);
         ir.memory = mem;
         push_operand(ir, mem_text(mem), OperandKind::mem, width);
+        if ((sub == 2u || sub == 4u) && mem.base == 0xFFu) {
+          ir.pc_relative_target = common::PcRelativeTarget{
+              0,
+              mem.displacement,
+              static_cast<std::uint64_t>(static_cast<std::int64_t>(mem.displacement)),
+              common::PcRelativeTarget::Kind::indirect_jump_via_table,
+          };
+        }
       }
       if (sub == 7) {
         ir.can_reencode = false;
@@ -297,11 +323,11 @@ InstructionIR decode_impl(const std::vector<std::uint8_t>& bytes, std::uint64_t 
       }
       else if (opcode >= 0x50 && opcode <= 0x57) { ir.mnemonic = "push"; push_operand(ir, reg_name(opcode - 0x50u, width), OperandKind::reg, width); }
       else if (opcode >= 0x58 && opcode <= 0x5F) { ir.mnemonic = "pop"; push_operand(ir, reg_name(opcode - 0x58u, width), OperandKind::reg, width); }
-      else if (opcode >= 0x70 && opcode <= 0x7F) { ir.mnemonic = "jcc"; ir.condition = static_cast<ConditionCode>(opcode & 0xFu); rel(1); }
+      else if (opcode >= 0x70 && opcode <= 0x7F) { ir.mnemonic = "jcc"; ir.condition = static_cast<ConditionCode>(opcode & 0xFu); rel(1, common::PcRelativeTarget::Kind::branch); }
       else if (opcode >= 0xB8 && opcode <= 0xBF) { ir.mnemonic = "mov"; push_operand(ir, reg_name(opcode - 0xB8u, width), OperandKind::reg, width); auto imm = read_imm(bytes, cur.off, width); push_operand(ir, std::to_string(imm), OperandKind::imm, width, imm); }
       else if (opcode == 0x0F) {
         const auto ext = cur.next();
-        if (ext >= 0x80 && ext <= 0x8F) { ir.mnemonic = "jcc"; ir.condition = static_cast<ConditionCode>(ext & 0xFu); rel(4); }
+        if (ext >= 0x80 && ext <= 0x8F) { ir.mnemonic = "jcc"; ir.condition = static_cast<ConditionCode>(ext & 0xFu); rel(4, common::PcRelativeTarget::Kind::branch); }
         else if (ext == 0xAF) modrm_rr("imul", true);
         else if (ext >= 0x90 && ext <= 0x9F) {
           ir.mnemonic = "setcc";

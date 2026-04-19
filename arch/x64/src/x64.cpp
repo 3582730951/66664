@@ -29,6 +29,7 @@ struct Instruction {
   std::uint8_t subop = 0;
   std::uint8_t jcc = 0;
   std::uint64_t target = 0;
+  std::optional<common::PcRelativeTarget> pc_relative_target;
 };
 
 constexpr std::uint8_t kTmp0 = 30;
@@ -122,6 +123,7 @@ struct Decoder {
     switch (opcode) {
       case 0x89: insn.mnemonic = "mov"; modrm_operand(false); break;
       case 0x8B: insn.mnemonic = "mov"; modrm_operand(true); break;
+      case 0x8D: insn.mnemonic = "lea"; modrm_operand(true); break;
       case 0x01: insn.mnemonic = "add"; modrm_operand(false); break;
       case 0x03: insn.mnemonic = "add"; modrm_operand(true); break;
       case 0x29: insn.mnemonic = "sub"; modrm_operand(false); break;
@@ -334,14 +336,29 @@ common::LiftedFunction X64Lifter::lift(const common::FunctionView& view) const {
   try {
     Decoder dec{view};
     while (!dec.eof()) {
-      insns.push_back(dec.decode_one());
+      auto insn = dec.decode_one();
+      const auto start = insn.offset;
+      const auto end = start + insn.size;
+      std::vector<std::uint8_t> slice(view.code.begin() + static_cast<std::ptrdiff_t>(start),
+                                      view.code.begin() + static_cast<std::ptrdiff_t>(end));
+      insn.pc_relative_target = decode_instruction(slice, view.base_addr + start).pc_relative_target;
+      insns.push_back(std::move(insn));
     }
   } catch (const std::exception& ex) {
     lifted.diagnostics.push_back({common::DiagnosticKind::unsupported_opcode, insns.empty() ? 0 : insns.back().offset, ex.what()});
     return lifted;
   }
   for (const auto& insn : insns) {
-    if (insn.mnemonic == "jmp" || insn.mnemonic == "jcc" || insn.mnemonic == "call") labels.emplace(insn.target, addr_label(insn.target));
+    if (insn.mnemonic == "jmp" || insn.mnemonic == "jcc" || insn.mnemonic == "call") {
+      labels.emplace(insn.target, addr_label(insn.target));
+    }
+    if (insn.pc_relative_target.has_value() &&
+        insn.pc_relative_target->kind == common::PcRelativeTarget::Kind::address_materialize) {
+      const auto absolute = insn.pc_relative_target->computed_absolute;
+      if (absolute >= view.base_addr && absolute < view.base_addr + view.code.size()) {
+        labels.emplace(absolute, addr_label(absolute));
+      }
+    }
   }
   text << "entry:\n";
   emit_prologue(text, view.cc);
@@ -354,6 +371,29 @@ common::LiftedFunction X64Lifter::lift(const common::FunctionView& view) const {
       emit_store_operand(text, insn.dst, kTmp0);
       if (insn.src.kind == Operand::Kind::imm) {
         carry_relocation(lifted.module, view, insn.offset + insn.size - insn.src.width, insn.src.width);
+      }
+    } else if (insn.mnemonic == "lea") {
+      if (insn.pc_relative_target.has_value() &&
+          insn.pc_relative_target->kind == common::PcRelativeTarget::Kind::address_materialize) {
+        const auto absolute = insn.pc_relative_target->computed_absolute;
+        if (const auto it = labels.find(absolute); it != labels.end()) {
+          text << "  ldi_u64 vr" << unsigned(kTmp0) << ", @" << it->second << "\n";
+        } else {
+          text << "  ldi_u64 vr" << unsigned(kTmp0) << ", " << absolute << "\n";
+        }
+        emit_store_operand(text, insn.dst, kTmp0);
+      } else if (insn.src.kind == Operand::Kind::mem && !insn.src.rip_relative) {
+        if (insn.src.reg == 4) {
+          text << "  lea vr" << unsigned(kTmp0) << ", [sp" << (insn.src.disp >= 0 ? "+" : "") << insn.src.disp
+               << "]\n";
+        } else {
+          text << "  lea vr" << unsigned(kTmp0) << ", [vr" << unsigned(insn.src.reg)
+               << (insn.src.disp >= 0 ? "+" : "") << insn.src.disp << "]\n";
+        }
+        emit_store_operand(text, insn.dst, kTmp0);
+      } else {
+        lifted.diagnostics.push_back({common::DiagnosticKind::unsupported_opcode, insn.offset, "x64_lifter: unsupported lea form"});
+        return lifted;
       }
     } else if (insn.mnemonic == "add" || insn.mnemonic == "sub" || insn.mnemonic == "and" || insn.mnemonic == "or" || insn.mnemonic == "xor") {
       emit_load_operand(text, insn.dst, kTmp0);
@@ -410,7 +450,6 @@ common::LiftedFunction X64Lifter::lift(const common::FunctionView& view) const {
     repl("add ", "iadd "); repl("sub ", "isub "); repl("mul ", "imul "); repl("div ", "idiv ");
     repl("and ", "iand "); repl("or ", "ior "); repl("xor ", "ixor "); repl("shl ", "ishl ");
     repl("shr ", "ishr "); repl("sar ", "isar "); repl("load_mem64", "imemld64"); repl("store_mem64", "imemst64");
-    repl("ret", "bret");
     try {
       lifted.vm2_module = vm2::assemble_module_text(vm2_text);
     } catch (const std::exception& ex) {

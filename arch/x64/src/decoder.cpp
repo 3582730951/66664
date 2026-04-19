@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 
 namespace vmp::arch::x64 {
 namespace common = vmp::arch::common;
@@ -106,6 +107,37 @@ std::int32_t sign_extend32(std::uint64_t value, std::size_t width) {
 }
 
 ConditionCode decode_cc(std::uint8_t code) { return static_cast<ConditionCode>(code & 0xFu); }
+
+bool memory_destination_opcode(std::string_view mnemonic) {
+  return mnemonic == "mov" || mnemonic == "movaps" || mnemonic == "movapd" || mnemonic == "movdqa" ||
+         mnemonic == "movdqu" || mnemonic == "vmovdqa" || mnemonic == "vmovdqu" || mnemonic == "vmovdqu64";
+}
+
+void assign_direct_pc_relative(InstructionIR& ir, std::uint64_t source_pc) {
+  if (!ir.has_relative_target) {
+    return;
+  }
+  const auto displacement = static_cast<std::int64_t>(ir.relative_target) - static_cast<std::int64_t>(source_pc);
+  const auto kind = ir.mnemonic == "call" ? common::PcRelativeTarget::Kind::call
+                                          : common::PcRelativeTarget::Kind::branch;
+  ir.pc_relative_target = common::PcRelativeTarget{source_pc, displacement, ir.relative_target, kind};
+}
+
+void assign_memory_pc_relative(InstructionIR& ir, std::uint64_t source_pc) {
+  if (!ir.memory.valid || !ir.memory.rip_relative) {
+    return;
+  }
+  auto kind = common::PcRelativeTarget::Kind::load;
+  if (ir.mnemonic == "lea") {
+    kind = common::PcRelativeTarget::Kind::address_materialize;
+  } else if (ir.mnemonic == "jmp" || ir.mnemonic == "call") {
+    kind = common::PcRelativeTarget::Kind::indirect_jump_via_table;
+  } else if (!ir.operand_kinds.empty() && ir.operand_kinds.front() == OperandKind::mem &&
+             memory_destination_opcode(ir.mnemonic)) {
+    kind = common::PcRelativeTarget::Kind::store;
+  }
+  ir.pc_relative_target = common::make_pc_relative_target(source_pc, ir.memory.displacement, kind);
+}
 
 void append_operand(InstructionIR& ir, const DecodedOperand& op) {
   ir.operands.push_back(op.text);
@@ -302,6 +334,11 @@ InstructionIR decode_with_prefix(const std::vector<std::uint8_t>& bytes, std::ui
     ir.size = cur.off - start;
     ir.can_reencode = true;
     ir.encoding.assign(bytes.begin() + static_cast<std::ptrdiff_t>(start), bytes.begin() + static_cast<std::ptrdiff_t>(cur.off));
+    const auto source_pc = address + static_cast<std::uint64_t>(cur.off);
+    assign_direct_pc_relative(ir, source_pc);
+    if (!ir.pc_relative_target.has_value()) {
+      assign_memory_pc_relative(ir, source_pc);
+    }
     return ir;
   };
 

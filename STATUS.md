@@ -1095,3 +1095,77 @@
   - AArch64 SVE、x86 更广 EVEX/AVX-512、ARM32 更全 Thumb-2 32-bit 与 VFP/NEON lane 语义仍保留 diagnostic/decode-only。
 - 下一子任务建议：
   - 继续把四个 lifter 从“主路径整数/访存/控制流 lowering”扩到“与 decoder IR 等宽的 FP/SIMD/系统 lowering”，并把 coverage matrix 从保守估算改成自动统计。
+
+### subtask_20
+- 本轮清单：
+  - 新增共享 PC-relative 抽象：`arch/common/include/vmp/arch/common/pc_relative.h`，提供 `PcRelativeTarget`、`Label`、`Kind` 以及 `encode_rel8/16/32`、`encode_pc_page` 等范围校验 helper。
+  - 四个 ISA 的 IR 全部新增 `std::optional<PcRelativeTarget> pc_relative_target` 字段，用于把“写 PC”与“读 PC-relative 地址”的信息从 decoder 传入 lifter。
+  - x64 decoder 完成以下目标标注：`jmp/call/jcc` rel8/rel32、RIP-relative `load/store/lea`、以及 VEX/EVEX 访存中的 RIP-relative addressing；`FF /4` RIP-relative 间接跳转统一标为 `indirect_jump_via_table`。
+  - x86 decoder 完成以下目标标注：`jmp/call/jcc` short/near、`loop/loope/loopne/jcxz/jecxz`、以及 `FF /2`/`FF /4` 通过内存表项的间接调用/跳转。
+  - arm32 decoder 完成以下目标标注：ARM `b/bl/blx imm`、Thumb `cbz/cbnz/b`、`tbb/tbh`、ARM/Thumb literal `ldr`、以及 `bx/blx reg`、`mov pc, rn` 间接跳转。
+  - arm64 decoder 完成以下目标标注：`adr/adrp`、`b/bl`、`b.cond`、`cbz/cbnz`、`tbz/tbnz`、literal `ldr`。
+  - 四个 lifter 均开始消费 `pc_relative_target`：
+    - 分支/调用类目标统一转换为 VM label 占位；
+    - x64 `lea [rip+disp]` 与 arm64 `adr/adrp` 会在目标落入当前 lifted view 时发射 label-form immediate；
+    - arm64 literal `ldr` 在可见 code view 中直接折叠出常量；x86/x64/arm 控制流目标使用 label 保持跨块一致性。
+  - VM1/VM2 汇编器扩展为允许 `ldi_u64` / `ildimm` 接收 `@label` 形式的立即数，从而在 subtask 21 之前先打通占位符流。
+  - 新增四个真实测试文件 `tests/arch/pc_relative_{x64,x86,arm,arm64}.cpp`，每 ISA 均提供 ≥15 条语料并覆盖 round-trip 与 lifter/integration。
+- 本轮保守解释：
+  - x86 的 `FF 25 disp32` / `FF 15 disp32` 在 32-bit 模式下是绝对地址内存操作数，不存在真正的 EIP-relative base。本轮统一将其解释为“通过表项进行的间接跳转/调用”：`kind=indirect_jump_via_table`，`source_pc=0`，`displacement` 与 `computed_absolute` 都记录该表项绝对地址；这样可以稳定保留“表项入口”语义，后续由 subtask 21 的 label/materialization 继续细化。
+  - 对于 address-materialize/literal-load 目标，如果 `computed_absolute` 落在当前 lifted code view 内，则优先 lower 为 VM label；若目标不在当前 view 内，则保留 concrete absolute 值，不伪造跨函数 label。
+- 本轮变更文件（相对路径）：
+  - `arch/README.md`
+  - `arch/arm/README.md`
+  - `arch/arm/include/vmp/arch/arm/ir.h`
+  - `arch/arm/src/arm.cpp`
+  - `arch/arm/src/decoder.cpp`
+  - `arch/arm64/README.md`
+  - `arch/arm64/include/vmp/arch/arm64/ir.h`
+  - `arch/arm64/src/arm64.cpp`
+  - `arch/arm64/src/decoder.cpp`
+  - `arch/common/README.md`
+  - `arch/common/include/vmp/arch/common/pc_relative.h`
+  - `arch/x64/README.md`
+  - `arch/x64/include/vmp/arch/x64/ir.h`
+  - `arch/x64/src/decoder.cpp`
+  - `arch/x64/src/x64.cpp`
+  - `arch/x86/README.md`
+  - `arch/x86/include/vmp/arch/x86/ir.h`
+  - `arch/x86/src/decoder.cpp`
+  - `arch/x86/src/x86.cpp`
+  - `runtime/vm1/src/vm1.cpp`
+  - `runtime/vm2/src/vm2.cpp`
+  - `tests/CMakeLists.txt`
+  - `tests/arch/pc_relative_arm.cpp`
+  - `tests/arch/pc_relative_arm64.cpp`
+  - `tests/arch/pc_relative_x64.cpp`
+  - `tests/arch/pc_relative_x86.cpp`
+  - `STATUS.md`
+- 覆盖矩阵：
+
+  | ISA | branch / call | load | store | address_materialize | indirect_jump_via_table | integration |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | x64 | ✅ rel8/rel32 + jcc/call | ✅ RIP-relative memory / VEX / EVEX | ✅ RIP-relative memory | ✅ `lea [rip+disp]` | ✅ `ff 25 [rip+disp]` | ✅ VM1 + VM2 |
+  | x86 | ✅ short/near + loop-family | n/a | n/a | n/a | ✅ `ff 15/25 disp32` | ✅ VM1 |
+  | arm32 | ✅ ARM/Thumb branch family | ✅ literal `ldr` | n/a | n/a | ✅ `bx/blx reg`、`mov pc, rn`、`tbb/tbh` | ✅ VM1 |
+  | arm64 | ✅ `b/bl/b.cond/cbz/cbnz/tbz/tbnz` | ✅ literal `ldr` | n/a | ✅ `adr/adrp` | n/a | ✅ VM1 |
+
+- 验证结果
+  - 本工作树：
+    - `cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64` ✅
+    - `cmake --build build -j` ✅
+    - `ctest --test-dir build --output-on-failure` ✅（`100% tests passed, 0 tests failed out of 132`；`Total Test time (real) = 1301.98 sec`）
+    - `cargo test --workspace` ✅（Rust 汇总 `22 passed / 0 failed / 0 ignored`）
+  - clean copy（`/tmp/vmp_port20`，由当前 working tree 复制）：
+    - `cmake -S . -B build -G Ninja -DVMP_PLATFORM=linux -DVMP_ARCH=x64` ✅
+    - `cmake --build build -j` ✅
+    - `ctest --test-dir build --output-on-failure` ✅（`100% tests passed, 0 tests failed out of 132`；`Total Test time (real) = 1190.84 sec`）
+    - `cargo test --workspace` ✅（Rust 汇总 `22 passed / 0 failed / 0 ignored`）
+  - 本轮附加扫描：
+    - 修改/新增文件执行 `rg -n "NOT_IMPLEMENTED"` ✅ 无命中
+    - 修改/新增文件执行 `rg -n "TODO"` ✅ 无命中
+- 未完成项：
+  - subtask 20 只负责“建模 + 传播 + 占位符打通”，尚未做跨 basic block / 跨函数的完整 Label 解析；该部分按计划留给 subtask 21。
+  - 对不落入当前 lifted view 的 PC-relative data/code 目标，目前保留 concrete absolute 值；更进一步的 relocation/late bind 由后续 subtask 21 接管。
+- 下一子任务建议：
+  - 进入 subtask 21，把 `Label.resolved_vm_pc` 的解析阶段落地到基本块/函数级别，并把当前 lifter 已发射的 `@label` 占位统一收敛成可执行 VM PC。

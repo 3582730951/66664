@@ -2,7 +2,12 @@
 
 - 支持 ABI：AAPCS64 (`x0..x7`)
 - 发射域：VM1
-- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target }`
+- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, immediate_values, memory, relative_target, pc_relative_target }`
+- PC-relative：
+  - `adr/adrp`：`kind=address_materialize`；`ADRP` 的 `displacement` 以 byte 保存（`4096` 的倍数）
+  - `b/bl/b.cond/cbz/cbnz/tbz/tbnz`：`kind=branch/call`
+  - `ldr Xt/Wt, label` literal：`kind=load`
+  - lifter 对 `adr/adrp` 优先 lowering 为 VM label-form `ldi_u64 @label`
 - 已验证指令族：
   - Data-processing：`adr/adrp/add/sub/and/orr/eor/movz/movk/movn/mul/sdiv/udiv/csel/csinv`
   - Branch：`b/bl/br/blr/ret/b.cond/cbz/cbnz/tbz/tbnz`

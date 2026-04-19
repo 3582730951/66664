@@ -483,6 +483,14 @@ std::uint32_t resolve_target(const std::string& token, const std::unordered_map<
   return static_cast<std::uint32_t>(parse_u64_value(token));
 }
 
+std::uint64_t parse_u64_or_label(const std::string& token,
+                                 const std::unordered_map<std::string, std::uint32_t>& labels) {
+  if (!token.empty() && token[0] == '@') {
+    return resolve_target(token, labels);
+  }
+  return parse_u64_value(token);
+}
+
 std::uint32_t resolve_const(const std::string& token, const std::unordered_map<std::string, std::uint32_t>& const_labels) {
   auto key = token;
   if (!key.empty() && key[0] == '&') key = key.substr(1);
@@ -773,7 +781,7 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
         break;
       case Opcode::ildimm:
         module.code.push_back(parse_general_register(inst.operands.at(0)));
-        append_u64(module.code, static_cast<std::uint64_t>(parse_i64(inst.operands.at(1))));
+        append_u64(module.code, parse_u64_or_label(inst.operands.at(1), program.labels));
         break;
       case Opcode::dldimm:
         module.code.push_back(parse_float_register(inst.operands.at(0)));

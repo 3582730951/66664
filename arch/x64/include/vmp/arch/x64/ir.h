@@ -2,10 +2,12 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include <vmp/arch/common/lifting.h>
+#include <vmp/arch/common/pc_relative.h>
 
 namespace vmp::arch::x64 {
 
@@ -86,6 +88,7 @@ struct InstructionIR {
   std::uint32_t flags = prefix_none;
   std::uint64_t relative_target = 0;
   bool has_relative_target = false;
+  std::optional<vmp::arch::common::PcRelativeTarget> pc_relative_target;
   bool can_reencode = false;
   std::string skip_reason;
   std::vector<std::uint8_t> encoding;

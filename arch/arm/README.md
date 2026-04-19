@@ -2,7 +2,12 @@
 
 - 支持 ABI：AAPCS32 (`r0..r3`)
 - 发射域：VM1
-- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, mode, immediate_values, memory, relative_target }`
+- 手写 decoder IR：`InstructionIR{ mnemonic, operands, operand_kinds, operand_sizes, condition, mode, immediate_values, memory, relative_target, pc_relative_target }`
+- PC-relative：
+  - ARM state：`b/bl` 以 `PC+8` 为 `source_pc`；`blx imm` 同步填充 call target
+  - `ldr Rd, [pc, #imm]` literal：`kind=load`
+  - `bx Rn` / `mov pc, Rn`：`kind=indirect_jump_via_table`
+  - Thumb：`cbz/cbnz/b/ldr literal/tbb/tbh` 均填充 `pc_relative_target`
 - 已验证指令族：
   - ARM state 数据处理：`mov/add/sub/and/eor/orr/cmp`
   - 分支：`b/bl/bx/blx` + 条件 `b<cc>`

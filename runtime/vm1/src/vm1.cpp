@@ -610,6 +610,13 @@ std::uint32_t resolve_target(const std::string& token, const std::map<std::strin
   return static_cast<std::uint32_t>(parse_u64_value(token));
 }
 
+std::uint64_t parse_u64_or_label(const std::string& token, const std::map<std::string, std::uint32_t>& labels) {
+  if (!token.empty() && token[0] == '@') {
+    return resolve_target(token, labels);
+  }
+  return parse_u64_value(token);
+}
+
 std::uint8_t parse_domain_token(const std::string& token) {
   if (token == "native") {
     return 0;
@@ -953,7 +960,7 @@ Vm1Module assemble_module_text(std::string_view text, std::uint16_t module_flags
       }
       case Opcode::ldi_u64: {
         module.code.push_back(parse_general_register(inst.operands.at(0)));
-        append_u64(module.code, parse_u64_value(inst.operands.at(1)));
+        append_u64(module.code, parse_u64_or_label(inst.operands.at(1), program.labels));
         break;
       }
       case Opcode::ldi_f64: {
