@@ -197,6 +197,9 @@ struct AssembleOptions {
   std::uint16_t module_flags = 0;
   bool encrypt_opcodes = false;
   std::optional<std::array<std::uint8_t, kOpcodeMapSeedSize>> opcode_seed;
+  bool enable_mba_obfuscation = false;
+  bool enable_opaque_predicates = false;
+  unsigned obfuscation_depth = 2;
 };
 
 Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags = 0);

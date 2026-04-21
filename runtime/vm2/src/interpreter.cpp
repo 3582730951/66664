@@ -13,6 +13,8 @@
 
 #include <vmp/runtime/cryptor/rolling_opcode_vm2.h>
 #include <vmp/runtime/env_integrity/monitor.h>
+#include <vmp/runtime/obfuscation/mba.h>
+#include <vmp/runtime/obfuscation/opaque.h>
 #include <vmp/runtime/stack_probe/probe.h>
 #include <vmp/runtime/vm1/vm1.h>
 #if VMP_WITH_JIT
@@ -241,6 +243,10 @@ Vm2Interpreter::Vm2Interpreter() { assert(vmp::runtime::vm1::handler_table_ident
 #define VMP_POLYMORPHIC_HANDLER_SEED 0
 #endif
 
+#ifndef VMP_ENABLE_OPAQUE_HANDLER_PREDICATES
+#define VMP_ENABLE_OPAQUE_HANDLER_PREDICATES 1
+#endif
+
 constexpr std::uint64_t kVm2PolymorphicBuildSeed =
     static_cast<std::uint64_t>(VMP_POLYMORPHIC_HANDLER_SEED) ^ 0x56324d3200000001ull;
 
@@ -330,6 +336,23 @@ VMP_NOINLINE void emit_vm2_polymorphic_junk() {
     sink = (sink << 7u) | (sink >> 57u);
     sink ^= salt_b;
   }
+#if VMP_ENABLE_OPAQUE_HANDLER_PREDICATES
+  volatile std::uint64_t opaque_seed =
+      vmp::runtime::obfuscation::opaque_handler_mix(sink ^ static_cast<std::uint64_t>(opcode_word),
+                                                    salt_a ^ (static_cast<std::uint64_t>(Variant) << 32u));
+  const auto opaque_true = vmp::runtime::obfuscation::opaque_even_product_predicate(opaque_seed);
+  volatile std::uint64_t opaque_probe =
+      vmp::runtime::obfuscation::mba_add_u64(
+          vmp::runtime::obfuscation::mba_mul2_u64(opaque_seed),
+          vmp::runtime::obfuscation::mba_sub_u64(salt_b, static_cast<std::uint64_t>(junk_length)));
+  sink ^= (opaque_probe & 0ull);
+  sink += ((opaque_probe >> 63u) & 0ull);
+  if (!opaque_true) {
+    sink = vmp::runtime::obfuscation::mba_add_u64(sink, salt_a);
+    sink ^= vmp::runtime::obfuscation::mba_mul2_u64(salt_b);
+    sink = vmp::runtime::obfuscation::mba_sub_u64(sink, static_cast<std::uint64_t>(junk_length));
+  }
+#endif
 #if defined(__GNUC__) || defined(__clang__)
   asm volatile("" : : "r"(sink) : "memory");
 #endif

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <vmp/runtime/integrity/crc32.h>
+#include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/strings/cipher.h>
 #include <array>
 #include <atomic>
@@ -1355,7 +1356,14 @@ Vm2Module assemble_module_text(std::string_view text, std::uint16_t module_flags
 }
 
 Vm2Module assemble_module_text(std::string_view text, const AssembleOptions& options) {
-  const auto program = parse_assembly(text);
+  std::string rewritten_source(text);
+  if (options.enable_mba_obfuscation) {
+    rewritten_source = vmp::runtime::obfuscation::obfuscate_vm2_assembly(
+        rewritten_source,
+        options.obfuscation_depth,
+        options.enable_opaque_predicates);
+  }
+  const auto program = parse_assembly(rewritten_source);
   Vm2Module module;
   module.version = options.encrypt_opcodes ? kVm2Version : kVm2LegacyVersion;
   module.module_flags = static_cast<std::uint16_t>(options.module_flags & ~VMP_FLAG_OPCODE_ENCRYPTED);
