@@ -40,7 +40,7 @@ function(vmp_add_seeded_runtime_vm_pair suffix seed_options_target seed_value)
     ${CMAKE_SOURCE_DIR}/runtime/vm1/src/vm1.cpp
     ${CMAKE_SOURCE_DIR}/runtime/vm1/src/interpreter.cpp
     ${CMAKE_SOURCE_DIR}/runtime/vm1/src/bridge.cpp)
-  target_link_libraries(vmp_runtime_vm1_${suffix} PUBLIC ${seed_options_target} vmp_runtime_audit vmp_runtime_strings vmp_runtime_cryptor vmp_runtime_obfuscation)
+  target_link_libraries(vmp_runtime_vm1_${suffix} PUBLIC ${seed_options_target} vmp_runtime_audit vmp_runtime_strings vmp_runtime_cryptor vmp_runtime_obfuscation vmp_runtime_self_mod)
   target_link_libraries(vmp_runtime_vm1_${suffix} PUBLIC vmp_runtime_env_integrity vmp_runtime_stack_probe)
   target_link_libraries(vmp_runtime_vm1_${suffix} PRIVATE vmp_arch_common)
   target_compile_definitions(vmp_runtime_vm1_${suffix} PRIVATE
@@ -56,12 +56,13 @@ function(vmp_add_seeded_runtime_vm_pair suffix seed_options_target seed_value)
     ${CMAKE_SOURCE_DIR}/runtime/jit/include
     ${CMAKE_SOURCE_DIR}/runtime/obfuscation/include
     ${CMAKE_SOURCE_DIR}/runtime/state/include
-    ${CMAKE_SOURCE_DIR}/runtime/stack_probe/include)
+    ${CMAKE_SOURCE_DIR}/runtime/stack_probe/include
+    ${CMAKE_SOURCE_DIR}/runtime/self_mod/include)
 
   add_library(vmp_runtime_vm2_${suffix} STATIC
     ${CMAKE_SOURCE_DIR}/runtime/vm2/src/vm2.cpp
     ${CMAKE_SOURCE_DIR}/runtime/vm2/src/interpreter.cpp)
-  target_link_libraries(vmp_runtime_vm2_${suffix} PUBLIC ${seed_options_target} vmp_runtime_audit vmp_runtime_strings vmp_runtime_vm1_${suffix} vmp_runtime_cryptor vmp_runtime_obfuscation)
+  target_link_libraries(vmp_runtime_vm2_${suffix} PUBLIC ${seed_options_target} vmp_runtime_audit vmp_runtime_strings vmp_runtime_vm1_${suffix} vmp_runtime_cryptor vmp_runtime_obfuscation vmp_runtime_self_mod)
   target_link_libraries(vmp_runtime_vm2_${suffix} PUBLIC vmp_runtime_env_integrity vmp_runtime_stack_probe)
   target_compile_definitions(vmp_runtime_vm2_${suffix} PRIVATE
     VMP_WITH_JIT=0
@@ -76,7 +77,8 @@ function(vmp_add_seeded_runtime_vm_pair suffix seed_options_target seed_value)
     ${CMAKE_SOURCE_DIR}/runtime/jit/include
     ${CMAKE_SOURCE_DIR}/runtime/obfuscation/include
     ${CMAKE_SOURCE_DIR}/runtime/state/include
-    ${CMAKE_SOURCE_DIR}/runtime/stack_probe/include)
+    ${CMAKE_SOURCE_DIR}/runtime/stack_probe/include
+    ${CMAKE_SOURCE_DIR}/runtime/self_mod/include)
 
   add_executable(polymorphic_handler_dump_${suffix} ${CMAKE_CURRENT_SOURCE_DIR}/polymorphic_handler_dump.cpp)
   target_link_libraries(polymorphic_handler_dump_${suffix} PRIVATE

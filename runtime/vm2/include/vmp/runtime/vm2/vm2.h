@@ -75,6 +75,7 @@ class Vm2Module {
   mutable std::unordered_map<std::uint32_t, std::uint64_t> function_hit_counters;
   mutable std::unordered_map<std::uint32_t, std::uintptr_t> function_jit_table;
   std::vector<std::uint8_t> timing_trap_metadata;
+  std::vector<std::uint8_t> self_mod_metadata;
 
   std::uint64_t id() const noexcept { return runtime_id; }
   std::uint64_t note_function_hit(std::uint32_t pc) const { return ++function_hit_counters[pc]; }

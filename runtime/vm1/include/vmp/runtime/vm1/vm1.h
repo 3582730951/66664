@@ -109,6 +109,7 @@ class Vm1Module {
   std::uint64_t runtime_id = 0;
   mutable std::unordered_map<std::uint32_t, std::uint64_t> block_hit_counters;
   std::vector<std::uint8_t> timing_trap_metadata;
+  std::vector<std::uint8_t> self_mod_metadata;
 
   std::uint64_t id() const noexcept { return runtime_id; }
   std::uint64_t note_block_hit(std::uint32_t pc) const { return ++block_hit_counters[pc]; }

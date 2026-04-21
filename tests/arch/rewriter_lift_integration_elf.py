@@ -185,6 +185,21 @@ target_include_directories(vmp_runtime_obfuscation PUBLIC
   {source_root}/runtime/vm1/include
   {source_root}/runtime/vm2/include)
 target_link_libraries(vmp_runtime_obfuscation PUBLIC vmp_runtime_audit vmp_runtime_strings)
+add_library(vmp_runtime_self_mod STATIC
+  {source_root}/runtime/self_mod/src/mutation.cpp
+  {source_root}/runtime/self_mod/src/interlock.cpp)
+target_include_directories(vmp_runtime_self_mod PUBLIC
+  {source_root}/runtime/self_mod/include
+  {source_root}/runtime/audit/include
+  {source_root}/runtime/cryptor/include
+  {source_root}/runtime/integrity/include
+  {source_root}/runtime/strings/include
+  {source_root}/runtime/vm1/include
+  {source_root}/runtime/vm2/include)
+target_link_libraries(vmp_runtime_self_mod PUBLIC
+  vmp_runtime_audit
+  vmp_runtime_integrity
+  vmp_runtime_strings)
 add_library(vmp_arch_common STATIC
   {source_root}/arch/common/src/lifting.cpp
   {source_root}/arch/common/src/label_resolver.cpp)
@@ -200,9 +215,9 @@ add_library(vmp_runtime_vm1 STATIC
   {source_root}/runtime/vm1/src/vm1.cpp
   {source_root}/runtime/vm1/src/interpreter.cpp
   {source_root}/runtime/vm1/src/bridge.cpp)
-target_include_directories(vmp_runtime_vm1 PUBLIC {source_root}/runtime/vm1/include {source_root}/runtime/cryptor/include {source_root}/runtime/strings/include {source_root}/runtime/audit/include {source_root}/runtime/integrity/include {source_root}/runtime/env_integrity/include {source_root}/runtime/trusted_oracle/include {source_root}/runtime/stack_probe/include {source_root}/runtime/obfuscation/include {source_root}/policy/include {source_root}/arch/common/include)
-target_link_libraries(vmp_runtime_vm1 PUBLIC vmp_runtime_obfuscation vmp_runtime_env_integrity vmp_runtime_stack_probe vmp_runtime_trusted_oracle vmp_runtime_cryptor vmp_runtime_integrity vmp_runtime_strings vmp_runtime_audit vmp_policy vmp_arch_common nlohmann_json::nlohmann_json)
-target_link_libraries(rewriter_lift_sample PRIVATE vmp_runtime_vm1 vmp_runtime_obfuscation vmp_runtime_env_integrity vmp_runtime_stack_probe vmp_runtime_trusted_oracle vmp_runtime_cryptor vmp_runtime_strings vmp_runtime_audit vmp_policy vmp_arch_common nlohmann_json::nlohmann_json)
+target_include_directories(vmp_runtime_vm1 PUBLIC {source_root}/runtime/vm1/include {source_root}/runtime/cryptor/include {source_root}/runtime/strings/include {source_root}/runtime/audit/include {source_root}/runtime/integrity/include {source_root}/runtime/env_integrity/include {source_root}/runtime/trusted_oracle/include {source_root}/runtime/stack_probe/include {source_root}/runtime/obfuscation/include {source_root}/runtime/self_mod/include {source_root}/policy/include {source_root}/arch/common/include)
+target_link_libraries(vmp_runtime_vm1 PUBLIC vmp_runtime_self_mod vmp_runtime_obfuscation vmp_runtime_env_integrity vmp_runtime_stack_probe vmp_runtime_trusted_oracle vmp_runtime_cryptor vmp_runtime_integrity vmp_runtime_strings vmp_runtime_audit vmp_policy vmp_arch_common nlohmann_json::nlohmann_json)
+target_link_libraries(rewriter_lift_sample PRIVATE vmp_runtime_vm1 vmp_runtime_self_mod vmp_runtime_obfuscation vmp_runtime_env_integrity vmp_runtime_stack_probe vmp_runtime_trusted_oracle vmp_runtime_cryptor vmp_runtime_strings vmp_runtime_audit vmp_policy vmp_arch_common nlohmann_json::nlohmann_json)
 ''')
     build = work / 'build'
     sh(['cmake', '-S', str(work), '-B', str(build), '-G', 'Ninja'])

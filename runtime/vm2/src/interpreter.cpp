@@ -18,6 +18,7 @@
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/obfuscation/opaque.h>
 #include <vmp/runtime/stack_probe/probe.h>
+#include <vmp/runtime/self_mod/mutation.h>
 #include <vmp/runtime/vm1/vm1.h>
 #if VMP_WITH_JIT
 #include <limits>
@@ -27,7 +28,7 @@
 namespace vmp::runtime::vm2 {
 namespace {
 
-std::uint8_t fetch_byte(const Vm2Module& module, std::size_t forward_pc) {
+std::uint8_t fetch_byte_base(const Vm2Module& module, std::size_t forward_pc) {
   if (forward_pc >= module.code.size()) throw Vm2Exception(static_cast<std::uint32_t>(forward_pc), "vm2: pc out of range");
   if ((module.module_flags & VMP_FLAG_OPCODE_ENCRYPTED) != 0u) {
     return vmp::runtime::cryptor::vm2::fetch_byte(module, forward_pc);
@@ -45,6 +46,13 @@ std::uint8_t fetch_byte(const Vm2Module& module, std::size_t forward_pc) {
   const auto reverse_pc = module.code.size() - static_cast<std::size_t>(inst_start) - inst_length +
                           (forward_pc - static_cast<std::size_t>(inst_start));
   return module.reverse_code.at(reverse_pc);
+}
+
+std::uint8_t fetch_byte(const Vm2Module& module, std::size_t forward_pc) {
+  return vmp::runtime::self_mod::fetch_vm2_byte(
+      module,
+      forward_pc,
+      [&module](std::size_t pc) { return fetch_byte_base(module, pc); });
 }
 
 std::uint16_t read_u16(const Vm2Module& module, std::size_t& pc) {
@@ -967,6 +975,7 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
   if (context.pc > context.module->code.size()) throw Vm2Exception(context.pc, "vm2: entry pc out of range");
   context.execution_halted = false;
   try {
+    vmp::runtime::self_mod::ScopedExecution self_mod_scope(context);
     while (!context.execution_halted) {
       if (context.timing_trap_state) {
         const auto observation = vmp::runtime::obfuscation::observe_timing_checkpoint(*context.timing_trap_state,

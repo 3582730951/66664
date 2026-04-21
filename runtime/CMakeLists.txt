@@ -1,5 +1,6 @@
 add_subdirectory(cryptor)
 add_subdirectory(obfuscation)
+add_subdirectory(self_mod)
 add_subdirectory(vm1)
 if(VMP_WITH_VM2)
   add_subdirectory(vm2)

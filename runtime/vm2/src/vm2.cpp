@@ -5,6 +5,7 @@
 #include <vmp/runtime/obfuscation/timing_trap.h>
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/strings/cipher.h>
+#include <vmp/runtime/self_mod/mutation.h>
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -1197,22 +1198,26 @@ Vm2Module Vm2Module::load_from_file(const std::string& path) {
 }
 
 Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
-  const auto timing_split = vmp::runtime::obfuscation::split_serialized_timing_trap_metadata(bytes);
-  const auto payload_end = timing_split.payload_end == 0u ? bytes.size() : timing_split.payload_end;
+  const auto self_mod_split = vmp::runtime::self_mod::split_serialized_metadata(bytes);
+  const auto self_mod_payload_end = self_mod_split.payload_end == 0u ? bytes.size() : self_mod_split.payload_end;
+  const ByteVector without_self_mod(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(self_mod_payload_end));
+  const auto timing_split = vmp::runtime::obfuscation::split_serialized_timing_trap_metadata(without_self_mod);
+  const auto payload_end = timing_split.payload_end == 0u ? without_self_mod.size() : timing_split.payload_end;
+  const ByteVector payload_bytes(without_self_mod.begin(), without_self_mod.begin() + static_cast<std::ptrdiff_t>(payload_end));
   if (payload_end < kVm2LegacyHeaderSize + kVm2KeyContextIdSize) throw std::runtime_error("vm2: module too small");
   Vm2Module module;
-  if (!std::equal(kVm2Magic.begin(), kVm2Magic.end(), bytes.begin())) throw std::runtime_error("vm2: bad magic");
+  if (!std::equal(kVm2Magic.begin(), kVm2Magic.end(), payload_bytes.begin())) throw std::runtime_error("vm2: bad magic");
   std::size_t offset = 4;
-  module.version = read_u16(bytes, offset);
+  module.version = read_u16(payload_bytes, offset);
   const auto header_size = vm2_header_size_for_version(module.version);
   if (payload_end < header_size + kVm2KeyContextIdSize) throw std::runtime_error("vm2: module too small");
-  module.module_flags = read_u16(bytes, offset);
-  module.entry_pc = read_u32(bytes, offset);
-  const auto code_size = read_u32(bytes, offset);
-  const auto const_pool_size = read_u32(bytes, offset);
-  module.crc32 = read_u32(bytes, offset);
+  module.module_flags = read_u16(payload_bytes, offset);
+  module.entry_pc = read_u32(payload_bytes, offset);
+  const auto code_size = read_u32(payload_bytes, offset);
+  const auto const_pool_size = read_u32(payload_bytes, offset);
+  module.crc32 = read_u32(payload_bytes, offset);
   if (module.version == kVm2Version) {
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+    std::copy_n(payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset),
                 kOpcodeMapSeedSize,
                 module.opcode_map_seed.begin());
     offset += kOpcodeMapSeedSize;
@@ -1231,14 +1236,14 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   if ((reverse_table_bytes % sizeof(std::uint16_t)) != 0u) {
     throw std::runtime_error("vm2: reverse length table must be uint16 aligned");
   }
-  const auto actual_crc32 = vmp::runtime::integrity::crc32_compute(bytes.data() + header_size,
+  const auto actual_crc32 = vmp::runtime::integrity::crc32_compute(payload_bytes.data() + header_size,
                                                                    code_size + reverse_table_bytes + const_pool_size);
   if (actual_crc32 != module.crc32) {
     append_module_crc_mismatch_audit("expected=" + hex_u32(module.crc32) + " actual=" + hex_u32(actual_crc32));
     throw std::runtime_error("vm2: crc32 mismatch");
   }
-  ByteVector serialized_code(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-                             bytes.begin() + static_cast<std::ptrdiff_t>(offset + code_size));
+  ByteVector serialized_code(payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                             payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset + code_size));
   offset += code_size;
   std::vector<std::uint16_t> reverse_lengths;
   if (reverse_layout) {
@@ -1246,7 +1251,7 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
     const auto reverse_count = reverse_table_bytes / sizeof(std::uint16_t);
     reverse_lengths.reserve(reverse_count);
     for (std::size_t i = 0; i < reverse_count; ++i) {
-      reverse_lengths.push_back(read_u16(bytes, table_cursor));
+      reverse_lengths.push_back(read_u16(payload_bytes, table_cursor));
     }
     offset = table_cursor;
     vmp::runtime::detail::audit_reverse_layout_active_once("vm2");
@@ -1255,7 +1260,7 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   const auto const_slots = const_pool_size / 16u;
   for (std::size_t i = 0; i < const_slots; ++i) {
     Vm2ConstPoolEntry entry{};
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset + i * 16u), 16, entry.bytes.begin());
+    std::copy_n(payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset + i * 16u), 16, entry.bytes.begin());
     std::uint32_t marker_crc32 = 0;
     if ((module.module_flags & VMP_FLAG_OPCODE_ENCRYPTED) != 0) {
       if (parse_opcode_marker_entry(entry, marker_crc32)) {
@@ -1271,9 +1276,12 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
     module.const_pool.push_back(entry);
   }
   offset += const_pool_size;
-  std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), kVm2KeyContextIdSize, module.key_context_id.begin());
+  std::copy_n(payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset), kVm2KeyContextIdSize, module.key_context_id.begin());
   if (!timing_split.trailer.empty()) {
     module.timing_trap_metadata = timing_split.trailer;
+  }
+  if (!self_mod_split.trailer.empty()) {
+    module.self_mod_metadata = self_mod_split.trailer;
   }
   if ((module.module_flags & VMP_FLAG_OPCODE_ENCRYPTED) != 0) {
     if (!saw_opcode_marker) {
@@ -1344,6 +1352,9 @@ std::vector<std::uint8_t> Vm2Module::serialize() const {
   out.insert(out.end(), key_context_id.begin(), key_context_id.end());
   if (!timing_trap_metadata.empty()) {
     out.insert(out.end(), timing_trap_metadata.begin(), timing_trap_metadata.end());
+  }
+  if (!self_mod_metadata.empty()) {
+    out.insert(out.end(), self_mod_metadata.begin(), self_mod_metadata.end());
   }
   return out;
 }

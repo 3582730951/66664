@@ -20,6 +20,7 @@
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/obfuscation/opaque.h>
 #include <vmp/runtime/stack_probe/probe.h>
+#include <vmp/runtime/self_mod/mutation.h>
 
 namespace vmp::runtime::vm1 {
 namespace {
@@ -29,7 +30,7 @@ struct BlockExecutionResult {
   bool halted = false;
 };
 
-std::uint8_t fetch_byte(const Vm1Module& module, std::size_t forward_pc) {
+std::uint8_t fetch_byte_base(const Vm1Module& module, std::size_t forward_pc) {
   if (forward_pc >= module.code.size()) {
     throw VmException(VmTrapCode::invalid_module, static_cast<std::uint32_t>(forward_pc), "vm1: pc out of range");
   }
@@ -51,6 +52,13 @@ std::uint8_t fetch_byte(const Vm1Module& module, std::size_t forward_pc) {
   const auto reverse_pc = module.code.size() - static_cast<std::size_t>(inst_start) - inst_length +
                           (forward_pc - static_cast<std::size_t>(inst_start));
   return module.reverse_code.at(reverse_pc);
+}
+
+std::uint8_t fetch_byte(const Vm1Module& module, std::size_t forward_pc) {
+  return vmp::runtime::self_mod::fetch_vm1_byte(
+      module,
+      forward_pc,
+      [&module](std::size_t pc) { return fetch_byte_base(module, pc); });
 }
 
 std::uint16_t read_u16(const Vm1Module& module, std::size_t& pc) {
@@ -1073,6 +1081,7 @@ ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
   }
   (void)vmp::runtime::env_integrity::verify_sensitive_domain_entry("vm1", context.audit_dispatcher);
   try {
+    vmp::runtime::self_mod::ScopedExecution self_mod_scope(context);
     while (!context.execution_halted) {
       const auto block_pc = context.pc;
       std::vector<std::uint32_t> observed_trace;

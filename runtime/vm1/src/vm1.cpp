@@ -5,6 +5,7 @@
 #include <vmp/runtime/obfuscation/timing_trap.h>
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/strings/cipher.h>
+#include <vmp/runtime/self_mod/mutation.h>
 
 #include <algorithm>
 #include <array>
@@ -1464,41 +1465,47 @@ Vm1Module Vm1Module::load_from_file(const std::string& path) {
 }
 
 Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < kVm1LegacyHeaderSize) {
+  const auto self_mod_split = vmp::runtime::self_mod::split_serialized_metadata(bytes);
+  const auto self_mod_payload_end = self_mod_split.payload_end == 0u ? bytes.size() : self_mod_split.payload_end;
+  const ByteVector without_self_mod(bytes.begin(), bytes.begin() + static_cast<std::ptrdiff_t>(self_mod_payload_end));
+  const auto timing_split = vmp::runtime::obfuscation::split_serialized_timing_trap_metadata(without_self_mod);
+  const auto payload_end = timing_split.payload_end == 0u ? without_self_mod.size() : timing_split.payload_end;
+  const ByteVector payload_bytes(without_self_mod.begin(), without_self_mod.begin() + static_cast<std::ptrdiff_t>(payload_end));
+  if (payload_bytes.size() < kVm1LegacyHeaderSize) {
     throw std::runtime_error("vm1: module too small");
   }
   Vm1Module module;
   module.runtime_id = g_next_vm1_module_id.fetch_add(1);
-  if (!std::equal(kVm1Magic.begin(), kVm1Magic.end(), bytes.begin())) {
+  if (!std::equal(kVm1Magic.begin(), kVm1Magic.end(), payload_bytes.begin())) {
     throw std::runtime_error("vm1: bad magic");
   }
   std::size_t offset = 4;
-  module.version = read_u16(bytes, offset);
+  module.version = read_u16(payload_bytes, offset);
   const auto header_size = vm1_header_size_for_version(module.version);
-  if (bytes.size() < header_size) {
+  if (payload_bytes.size() < header_size) {
     throw std::runtime_error("vm1: module too small");
   }
-  module.module_flags = read_u16(bytes, offset);
-  module.entry_pc = read_u32(bytes, offset);
-  const auto code_size = read_u32(bytes, offset);
-  const auto const_count = read_u32(bytes, offset);
-  module.crc32 = read_u32(bytes, offset);
+  module.module_flags = read_u16(payload_bytes, offset);
+  module.entry_pc = read_u32(payload_bytes, offset);
+  const auto code_size = read_u32(payload_bytes, offset);
+  const auto const_count = read_u32(payload_bytes, offset);
+  module.crc32 = read_u32(payload_bytes, offset);
   if (module.version == kVm1Version) {
-    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+    std::copy_n(payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset),
                 kOpcodeMapSeedSize,
                 module.opcode_map_seed.begin());
     offset += kOpcodeMapSeedSize;
   }
-  const auto actual_crc32 = vm1_body_crc32(bytes, header_size, code_size, const_count, module.module_flags);
+  const auto actual_crc32 = vm1_body_crc32(payload_bytes, header_size, code_size, const_count, module.module_flags);
   if (actual_crc32 != module.crc32) {
     append_module_crc_mismatch_audit("expected=" + hex_u32(module.crc32) + " actual=" + hex_u32(actual_crc32));
     throw std::runtime_error("vm1: crc32 mismatch");
   }
-  if (offset + code_size > bytes.size()) {
+  if (offset + code_size > payload_bytes.size()) {
     throw std::runtime_error("vm1: truncated code");
   }
-  ByteVector serialized_code(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-                             bytes.begin() + static_cast<std::ptrdiff_t>(offset + code_size));
+  ByteVector serialized_code(payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                             payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset + code_size));
   offset += code_size;
   std::vector<std::uint16_t> reverse_lengths;
   if ((module.module_flags & VMP_FLAG_REVERSE_ORDER) != 0u) {
@@ -1508,19 +1515,19 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
       cryptor = opcode_cryptor_for_seed(module.opcode_map_seed);
       cryptor_ptr = &*cryptor;
     }
-    const auto reverse_info = locate_vm1_reverse_length_table(bytes, offset, serialized_code, const_count, cryptor_ptr);
+    const auto reverse_info = locate_vm1_reverse_length_table(payload_bytes, offset, serialized_code, const_count, cryptor_ptr);
     reverse_lengths = reverse_info.first;
     offset = reverse_info.second;
     vmp::runtime::detail::audit_reverse_layout_active_once("vm1");
   }
   bool saw_opcode_marker = false;
   for (std::uint32_t i = 0; i < const_count; ++i) {
-    if (offset >= bytes.size()) {
+    if (offset >= payload_bytes.size()) {
       throw std::runtime_error("vm1: truncated const kind");
     }
-    const auto kind = static_cast<ConstKind>(bytes[offset++]);
-    const auto payload_size = read_u32(bytes, offset);
-    if (offset + payload_size > bytes.size()) {
+    const auto kind = static_cast<ConstKind>(payload_bytes[offset++]);
+    const auto payload_size = read_u32(payload_bytes, offset);
+    if (offset + payload_size > payload_bytes.size()) {
       throw std::runtime_error("vm1: truncated const payload");
     }
     if (kind == ConstKind::opcode_map_marker) {
@@ -1529,13 +1536,13 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
         throw std::runtime_error("vm1: malformed opcode-map marker");
       }
       std::size_t marker_offset = offset;
-      module.opcode_map_marker_crc32 = read_u32(bytes, marker_offset);
+      module.opcode_map_marker_crc32 = read_u32(payload_bytes, marker_offset);
       saw_opcode_marker = true;
     } else {
       ConstPoolEntry entry;
       entry.kind = kind;
-      entry.bytes.assign(bytes.begin() + static_cast<std::ptrdiff_t>(offset),
-                         bytes.begin() + static_cast<std::ptrdiff_t>(offset + payload_size));
+      entry.bytes.assign(payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+                         payload_bytes.begin() + static_cast<std::ptrdiff_t>(offset + payload_size));
       module.const_pool.push_back(std::move(entry));
     }
     offset += payload_size;
@@ -1572,9 +1579,11 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   } else {
     clear_reverse_layout_cache(module);
   }
-  const auto timing_split = vmp::runtime::obfuscation::split_serialized_timing_trap_metadata(bytes);
   if (!timing_split.trailer.empty()) {
     module.timing_trap_metadata = timing_split.trailer;
+  }
+  if (!self_mod_split.trailer.empty()) {
+    module.self_mod_metadata = self_mod_split.trailer;
   }
   return module;
 }
@@ -1634,6 +1643,9 @@ std::vector<std::uint8_t> Vm1Module::serialize() const {
   out.insert(out.end(), body.begin(), body.end());
   if (!timing_trap_metadata.empty()) {
     out.insert(out.end(), timing_trap_metadata.begin(), timing_trap_metadata.end());
+  }
+  if (!self_mod_metadata.empty()) {
+    out.insert(out.end(), self_mod_metadata.begin(), self_mod_metadata.end());
   }
   return out;
 }
