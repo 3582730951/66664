@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <vmp/runtime/integrity/crc32.h>
+#include <vmp/runtime/obfuscation/timing_trap.h>
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/strings/cipher.h>
 #include <array>
@@ -1063,7 +1064,8 @@ std::uint32_t OpcodeCryptor::sanity_marker_crc32() const {
 Vm2Exception::Vm2Exception(std::uint32_t pc, std::string message) : std::runtime_error(std::move(message)), pc_(pc) {}
 
 Vm2Context::Vm2Context(const Vm2Module& module_in, std::size_t stack_size)
-    : pc(module_in.entry_pc), sp(stack_size), module(&module_in), stack_(stack_size, 0) {
+    : pc(module_in.entry_pc), sp(stack_size), module(&module_in), stack_(stack_size, 0),
+      timing_trap_state(vmp::runtime::obfuscation::make_timing_trap_state(module_in)) {
   if ((sp & 0xFu) != 0) {
     sp &= ~std::uint64_t(0xFu);
   }
@@ -1195,13 +1197,15 @@ Vm2Module Vm2Module::load_from_file(const std::string& path) {
 }
 
 Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
-  if (bytes.size() < kVm2LegacyHeaderSize + kVm2KeyContextIdSize) throw std::runtime_error("vm2: module too small");
+  const auto timing_split = vmp::runtime::obfuscation::split_serialized_timing_trap_metadata(bytes);
+  const auto payload_end = timing_split.payload_end == 0u ? bytes.size() : timing_split.payload_end;
+  if (payload_end < kVm2LegacyHeaderSize + kVm2KeyContextIdSize) throw std::runtime_error("vm2: module too small");
   Vm2Module module;
   if (!std::equal(kVm2Magic.begin(), kVm2Magic.end(), bytes.begin())) throw std::runtime_error("vm2: bad magic");
   std::size_t offset = 4;
   module.version = read_u16(bytes, offset);
   const auto header_size = vm2_header_size_for_version(module.version);
-  if (bytes.size() < header_size + kVm2KeyContextIdSize) throw std::runtime_error("vm2: module too small");
+  if (payload_end < header_size + kVm2KeyContextIdSize) throw std::runtime_error("vm2: module too small");
   module.module_flags = read_u16(bytes, offset);
   module.entry_pc = read_u32(bytes, offset);
   const auto code_size = read_u32(bytes, offset);
@@ -1215,13 +1219,13 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   }
   if ((const_pool_size % 16u) != 0) throw std::runtime_error("vm2: const pool must be 16-byte aligned");
   const auto reverse_layout = (module.module_flags & VMP_FLAG_REVERSE_ORDER) != 0u;
-  if (bytes.size() < header_size + code_size + const_pool_size + kVm2KeyContextIdSize) {
+  if (payload_end < header_size + code_size + const_pool_size + kVm2KeyContextIdSize) {
     throw std::runtime_error("vm2: truncated const pool");
   }
   const auto reverse_table_bytes = reverse_layout
-                                       ? bytes.size() - header_size - code_size - const_pool_size - kVm2KeyContextIdSize
+                                       ? payload_end - header_size - code_size - const_pool_size - kVm2KeyContextIdSize
                                        : std::size_t{0};
-  if (offset + code_size + reverse_table_bytes + const_pool_size + kVm2KeyContextIdSize > bytes.size()) {
+  if (offset + code_size + reverse_table_bytes + const_pool_size + kVm2KeyContextIdSize > payload_end) {
     throw std::runtime_error("vm2: truncated const pool");
   }
   if ((reverse_table_bytes % sizeof(std::uint16_t)) != 0u) {
@@ -1268,6 +1272,9 @@ Vm2Module Vm2Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   }
   offset += const_pool_size;
   std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(offset), kVm2KeyContextIdSize, module.key_context_id.begin());
+  if (!timing_split.trailer.empty()) {
+    module.timing_trap_metadata = timing_split.trailer;
+  }
   if ((module.module_flags & VMP_FLAG_OPCODE_ENCRYPTED) != 0) {
     if (!saw_opcode_marker) {
       append_opcode_map_invalid_audit("vm2 missing opcode-map marker");
@@ -1335,6 +1342,9 @@ std::vector<std::uint8_t> Vm2Module::serialize() const {
   }
   out.insert(out.end(), body.begin(), body.end());
   out.insert(out.end(), key_context_id.begin(), key_context_id.end());
+  if (!timing_trap_metadata.empty()) {
+    out.insert(out.end(), timing_trap_metadata.begin(), timing_trap_metadata.end());
+  }
   return out;
 }
 

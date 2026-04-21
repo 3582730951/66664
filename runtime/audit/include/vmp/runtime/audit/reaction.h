@@ -14,6 +14,7 @@ struct ReactionDispatcher {
 
   void dispatch(const AnalysisEventRecord& record) noexcept;
   void dispatch(const AnalysisEventRecord& record, ReactionPolicy policy) noexcept;
+  void dispatch_without_exit(const AnalysisEventRecord& record, ReactionPolicy policy) noexcept;
 
   void set_exit_fn(std::function<void()> exit_fn) noexcept;
   void set_scheduler(std::function<void(std::chrono::milliseconds, std::function<void()>)> scheduler) noexcept;

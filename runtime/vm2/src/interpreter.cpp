@@ -13,6 +13,7 @@
 
 #include <vmp/runtime/cryptor/rolling_opcode_vm2.h>
 #include <vmp/runtime/env_integrity/monitor.h>
+#include <vmp/runtime/obfuscation/timing_trap.h>
 #include <vmp/runtime/obfuscation/bogus_flow.h>
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/obfuscation/opaque.h>
@@ -110,6 +111,15 @@ void set_predicates_from_value(Vm2Context& context, std::uint64_t value, bool ca
   context.p[1] = (static_cast<std::int64_t>(value) < 0);
   context.p[2] = carry;
   context.p[3] = overflow;
+}
+
+
+void apply_timing_trap_siren(Vm2Context& context, const vmp::runtime::obfuscation::TimingTrapObservation& observation) {
+  context.r[0] += observation.primary_bias;
+  if constexpr (kVm2GeneralRegisterCount > 1u) {
+    context.r[1] ^= observation.secondary_bias;
+  }
+  set_predicates_from_value(context, context.r[0]);
 }
 
 void set_predicates_from_vec(Vm2Context& context, const Vec128& value) {
@@ -958,6 +968,16 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
   context.execution_halted = false;
   try {
     while (!context.execution_halted) {
+      if (context.timing_trap_state) {
+        const auto observation = vmp::runtime::obfuscation::observe_timing_checkpoint(*context.timing_trap_state,
+                                                                                       context.pc,
+                                                                                       context.module->id(),
+                                                                                       context.audit_dispatcher,
+                                                                                       "vm2");
+        if (observation.siren_active) {
+          apply_timing_trap_siren(context, observation);
+        }
+      }
       (void)vmp::runtime::stack_probe::default_stack_probe().maybe_probe(
           vmp::runtime::stack_probe::ProbeRequest{
               vmp::runtime::stack_probe::selector_low12(reinterpret_cast<std::uintptr_t>(context.module) ^ context.module->id()),

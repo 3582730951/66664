@@ -2,6 +2,7 @@
 
 #include <vmp/arch/common/label_resolver.h>
 #include <vmp/runtime/integrity/crc32.h>
+#include <vmp/runtime/obfuscation/timing_trap.h>
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/strings/cipher.h>
 
@@ -1345,7 +1346,8 @@ VmException::VmException(VmTrapCode code, std::uint32_t pc, std::string message)
     : std::runtime_error(std::move(message)), code_(code), pc_(pc) {}
 
 Vm1Context::Vm1Context(const Vm1Module& module_in, std::size_t stack_size)
-    : pc(module_in.entry_pc), module(&module_in), stack_(stack_size, 0) {}
+    : pc(module_in.entry_pc), module(&module_in), stack_(stack_size, 0),
+      timing_trap_state(vmp::runtime::obfuscation::make_timing_trap_state(module_in)) {}
 
 
 std::size_t Vm1Context::stack_size() const noexcept { return stack_.size(); }
@@ -1570,6 +1572,10 @@ Vm1Module Vm1Module::load_from_bytes(const std::vector<std::uint8_t>& bytes) {
   } else {
     clear_reverse_layout_cache(module);
   }
+  const auto timing_split = vmp::runtime::obfuscation::split_serialized_timing_trap_metadata(bytes);
+  if (!timing_split.trailer.empty()) {
+    module.timing_trap_metadata = timing_split.trailer;
+  }
   return module;
 }
 
@@ -1626,6 +1632,9 @@ std::vector<std::uint8_t> Vm1Module::serialize() const {
     out.insert(out.end(), opcode_map_seed.begin(), opcode_map_seed.end());
   }
   out.insert(out.end(), body.begin(), body.end());
+  if (!timing_trap_metadata.empty()) {
+    out.insert(out.end(), timing_trap_metadata.begin(), timing_trap_metadata.end());
+  }
   return out;
 }
 

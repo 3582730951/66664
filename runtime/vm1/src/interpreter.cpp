@@ -15,6 +15,7 @@
 #endif
 #include <vmp/runtime/cryptor/rolling_opcode_vm1.h>
 #include <vmp/runtime/env_integrity/monitor.h>
+#include <vmp/runtime/obfuscation/timing_trap.h>
 #include <vmp/runtime/obfuscation/bogus_flow.h>
 #include <vmp/runtime/obfuscation/mba.h>
 #include <vmp/runtime/obfuscation/opaque.h>
@@ -115,6 +116,15 @@ void set_logic_flags(Vm1Context& context, std::uint64_t value) {
   set_common_flags(context, value);
   context.flags.carry = false;
   context.flags.overflow = false;
+}
+
+
+void apply_timing_trap_siren(Vm1Context& context, const vmp::runtime::obfuscation::TimingTrapObservation& observation) {
+  context.vr[0] += observation.primary_bias;
+  if constexpr (kVm1GeneralRegisterCount > 1u) {
+    context.vr[1] ^= observation.secondary_bias;
+  }
+  set_logic_flags(context, context.vr[0]);
 }
 
 void dispatch_audit(Vm1Context& context, const std::string& event_type, const std::string& note) {
@@ -1015,6 +1025,16 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
   do {
     control_flow_changed = false;
     const std::uint32_t instruction_pc = context.pc;
+    if (context.timing_trap_state) {
+      const auto observation = vmp::runtime::obfuscation::observe_timing_checkpoint(*context.timing_trap_state,
+                                                                                     instruction_pc,
+                                                                                     context.module->id(),
+                                                                                     context.audit_dispatcher,
+                                                                                     "vm1");
+      if (observation.siren_active) {
+        apply_timing_trap_siren(context, observation);
+      }
+    }
     std::size_t cursor = context.pc;
     const auto opcode = static_cast<Opcode>(read_u16(*context.module, cursor));
     context.pc = static_cast<std::uint32_t>(cursor);

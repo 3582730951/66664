@@ -152,7 +152,8 @@ add_library(vmp_runtime_integrity STATIC
 target_include_directories(vmp_runtime_integrity PUBLIC {source_root}/runtime/integrity/include)
 add_library(vmp_runtime_strings STATIC
   {source_root}/runtime/strings/src/strings.cpp
-  {source_root}/runtime/strings/src/keyctx.cpp)
+  {source_root}/runtime/strings/src/keyctx.cpp
+  {source_root}/runtime/strings/src/aes256_ctr.cpp)
 target_include_directories(vmp_runtime_strings PUBLIC {source_root}/runtime/strings/include {source_root}/policy/include {source_root}/runtime/audit/include)
 target_link_libraries(vmp_runtime_strings PUBLIC vmp_policy vmp_runtime_audit nlohmann_json::nlohmann_json)
 add_library(vmp_runtime_trusted_oracle STATIC
@@ -175,8 +176,15 @@ target_link_libraries(vmp_runtime_cryptor PUBLIC vmp_runtime_audit vmp_runtime_s
 add_library(vmp_runtime_obfuscation STATIC
   {source_root}/runtime/obfuscation/src/bogus_flow.cpp
   {source_root}/runtime/obfuscation/src/mba.cpp
-  {source_root}/runtime/obfuscation/src/opaque.cpp)
-target_include_directories(vmp_runtime_obfuscation PUBLIC {source_root}/runtime/obfuscation/include)
+  {source_root}/runtime/obfuscation/src/opaque.cpp
+  {source_root}/runtime/obfuscation/src/timing_trap.cpp)
+target_include_directories(vmp_runtime_obfuscation PUBLIC
+  {source_root}/runtime/obfuscation/include
+  {source_root}/runtime/audit/include
+  {source_root}/runtime/strings/include
+  {source_root}/runtime/vm1/include
+  {source_root}/runtime/vm2/include)
+target_link_libraries(vmp_runtime_obfuscation PUBLIC vmp_runtime_audit vmp_runtime_strings)
 add_library(vmp_arch_common STATIC
   {source_root}/arch/common/src/lifting.cpp
   {source_root}/arch/common/src/label_resolver.cpp)

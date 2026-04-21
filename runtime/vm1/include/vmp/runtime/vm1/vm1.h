@@ -16,6 +16,11 @@
 #include <vmp/runtime/strings/cipher.h>
 #include <vmp/runtime/vm1/isa.h>
 
+
+namespace vmp::runtime::obfuscation {
+struct TimingTrapRuntimeState;
+}
+
 namespace vmp::runtime::vm1 {
 
 struct KeyContext {
@@ -103,6 +108,7 @@ class Vm1Module {
   std::vector<ConstPoolEntry> const_pool;
   std::uint64_t runtime_id = 0;
   mutable std::unordered_map<std::uint32_t, std::uint64_t> block_hit_counters;
+  std::vector<std::uint8_t> timing_trap_metadata;
 
   std::uint64_t id() const noexcept { return runtime_id; }
   std::uint64_t note_block_hit(std::uint32_t pc) const { return ++block_hit_counters[pc]; }
@@ -135,6 +141,7 @@ class Vm1Context {
   vmp::runtime::audit::ReactionDispatcher* audit_dispatcher = nullptr;
   std::shared_ptr<vmp::runtime::strings::StringPool> string_pool;
   int max_bridge_depth = 64;
+  std::shared_ptr<vmp::runtime::obfuscation::TimingTrapRuntimeState> timing_trap_state;
 
   std::size_t stack_size() const noexcept;
   std::uint64_t stack_top() const noexcept;

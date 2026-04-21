@@ -18,6 +18,11 @@
 #include <vmp/runtime/strings/keyctx.h>
 #include <vmp/runtime/vm2/isa.h>
 
+
+namespace vmp::runtime::obfuscation {
+struct TimingTrapRuntimeState;
+}
+
 namespace vmp::runtime::vm2 {
 
 struct Vm2ConstPoolEntry {
@@ -69,6 +74,7 @@ class Vm2Module {
   std::unordered_set<std::uint32_t> function_entries;
   mutable std::unordered_map<std::uint32_t, std::uint64_t> function_hit_counters;
   mutable std::unordered_map<std::uint32_t, std::uintptr_t> function_jit_table;
+  std::vector<std::uint8_t> timing_trap_metadata;
 
   std::uint64_t id() const noexcept { return runtime_id; }
   std::uint64_t note_function_hit(std::uint32_t pc) const { return ++function_hit_counters[pc]; }
@@ -139,6 +145,7 @@ class Vm2Context {
   vmp::runtime::audit::ReactionDispatcher* audit_dispatcher = nullptr;
   std::shared_ptr<vmp::runtime::strings::StringPool> string_pool;
   int max_bridge_depth = 64;
+  std::shared_ptr<vmp::runtime::obfuscation::TimingTrapRuntimeState> timing_trap_state;
 
   std::size_t stack_size() const noexcept;
   void set_sp(std::uint64_t value);

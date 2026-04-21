@@ -71,6 +71,18 @@ void ReactionDispatcher::dispatch(const AnalysisEventRecord& record, ReactionPol
   }
 }
 
+void ReactionDispatcher::dispatch_without_exit(const AnalysisEventRecord& record, ReactionPolicy policy) noexcept {
+  try {
+    writer.append(record);
+    if (policy == ReactionPolicy::audit_only || policy == ReactionPolicy::log) {
+      return;
+    }
+    writer.flush();
+    (void)runtime_state_bridge(record, policy);
+  } catch (...) {
+  }
+}
+
 void ReactionDispatcher::set_exit_fn(std::function<void()> exit_fn_in) noexcept { exit_fn = std::move(exit_fn_in); }
 
 void ReactionDispatcher::set_scheduler(
