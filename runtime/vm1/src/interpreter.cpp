@@ -1,5 +1,7 @@
 #include <vmp/runtime/vm1/vm1.h>
 
+#include <array>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -254,31 +256,205 @@ vmp::runtime::bridge::Domain bridge_domain_from_byte(std::uint8_t raw) {
   }
 }
 
-BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t start_pc) {
-  if (context.module == nullptr) {
-    throw VmException(VmTrapCode::invalid_module, 0, "vm1: null module");
+
+#if defined(_MSC_VER)
+#define VMP_NOINLINE __declspec(noinline)
+#else
+#define VMP_NOINLINE __attribute__((noinline))
+#endif
+
+#ifndef VMP_POLYMORPHIC_HANDLER_SEED
+#define VMP_POLYMORPHIC_HANDLER_SEED 0
+#endif
+
+constexpr std::uint64_t kVm1PolymorphicBuildSeed =
+    static_cast<std::uint64_t>(VMP_POLYMORPHIC_HANDLER_SEED) ^ 0x56314d3100000001ull;
+
+constexpr std::uint64_t mix_u64(std::uint64_t value) {
+  value += 0x9e3779b97f4a7c15ull;
+  value = (value ^ (value >> 30u)) * 0xbf58476d1ce4e5b9ull;
+  value = (value ^ (value >> 27u)) * 0x94d049bb133111ebull;
+  return value ^ (value >> 31u);
+}
+
+constexpr std::uint8_t vm1_variant_for_opcode_word(std::uint16_t word) {
+  return static_cast<std::uint8_t>(mix_u64(kVm1PolymorphicBuildSeed ^ static_cast<std::uint64_t>(word)) % 3ull);
+}
+
+constexpr std::uint8_t vm1_junk_length_for_opcode_word(std::uint16_t word) {
+  return static_cast<std::uint8_t>(4u + (mix_u64(kVm1PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(word) << 11u)) % 29ull));
+}
+
+constexpr std::uint64_t vm1_handler_fingerprint_value(std::uint16_t word,
+                                                      std::size_t canonical_index,
+                                                      std::size_t shuffled_index) {
+  return mix_u64(kVm1PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(word) << 32u) ^
+                 (static_cast<std::uint64_t>(canonical_index) << 16u) ^ static_cast<std::uint64_t>(shuffled_index));
+}
+
+struct Vm1DispatchFrame {
+  Vm1Context& context;
+  std::uint32_t instruction_pc;
+  std::size_t& cursor;
+  bool& halted;
+  bool& control_flow_changed;
+};
+
+using Vm1HandlerFn = void (*)(Vm1DispatchFrame&);
+
+struct Vm1HandlerRuntimeEntry {
+  PolymorphicHandlerInfo info{};
+  Vm1HandlerFn fn = nullptr;
+};
+
+const void* vm1_handler_entry_identity(Vm1HandlerFn fn) noexcept {
+  union {
+    Vm1HandlerFn fn;
+    const void* ptr;
+  } caster{fn};
+  return caster.ptr;
+}
+
+struct Vm1HandlerCatalog {
+  PolymorphicHandlerLayout layout{};
+  std::vector<Vm1HandlerRuntimeEntry> runtime_entries;
+  std::vector<std::pair<std::uint16_t, std::size_t>> lookup_by_opcode;
+
+  const Vm1HandlerRuntimeEntry* resolve(Opcode opcode) const {
+    const auto word = static_cast<std::uint16_t>(opcode);
+    const auto it = std::lower_bound(
+        lookup_by_opcode.begin(), lookup_by_opcode.end(), word,
+        [](const auto& lhs, std::uint16_t rhs) { return lhs.first < rhs; });
+    if (it == lookup_by_opcode.end() || it->first != word) {
+      return nullptr;
+    }
+    return &runtime_entries[it->second];
   }
-  (void)vmp::runtime::stack_probe::default_stack_probe().maybe_probe(
-      vmp::runtime::stack_probe::ProbeRequest{
-          vmp::runtime::stack_probe::selector_low12(reinterpret_cast<std::uintptr_t>(context.module) ^ context.module->id()),
-          vmp::runtime::stack_probe::ProbeTriggerSite::vm1_handler_dispatch,
-          vmp::runtime::stack_probe::kDefaultMaxFrames},
-      context.audit_dispatcher);
-  auto dispatch_scope = vmp::runtime::cryptor::vm1::begin_dispatch(*context.module);
-  if (start_pc >= context.module->code.size()) {
-    throw VmException(VmTrapCode::invalid_module, start_pc, "vm1: pc out of range");
+};
+
+void execute_vm1_opcode(Vm1DispatchFrame& frame, Opcode opcode);
+
+template <Opcode Op, unsigned Variant>
+VMP_NOINLINE void emit_vm1_polymorphic_junk() {
+  constexpr auto opcode_word = static_cast<std::uint16_t>(Op);
+  constexpr auto junk_length = vm1_junk_length_for_opcode_word(opcode_word);
+  constexpr auto salt_a = mix_u64(kVm1PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(opcode_word) << 9u) ^ Variant);
+  constexpr auto salt_b = mix_u64(kVm1PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(junk_length) << 17u) ^
+                                  (static_cast<std::uint64_t>(Variant) << 33u));
+  volatile std::uint64_t sink = salt_a ^ salt_b ^ junk_length;
+  if constexpr (Variant == 0u) {
+    sink += salt_a;
+    sink ^= salt_b;
+    sink -= salt_a;
+  } else if constexpr (Variant == 1u) {
+    sink ^= salt_a;
+    sink += static_cast<std::uint64_t>(junk_length) * 0x101ull;
+    sink ^= (salt_b >> 1u);
+  } else {
+    sink += (salt_a ^ salt_b);
+    sink = (sink << 7u) | (sink >> 57u);
+    sink ^= salt_b;
   }
-  context.execution_halted = false;
-  context.pc = start_pc;
-  bool halted = false;
-  bool control_flow_changed = false;
-  do {
-    control_flow_changed = false;
-    const std::uint32_t instruction_pc = context.pc;
-    std::size_t cursor = context.pc;
-    const auto opcode = static_cast<Opcode>(read_u16(*context.module, cursor));
-    context.pc = static_cast<std::uint32_t>(cursor);
-    switch (opcode) {
+#if defined(__GNUC__) || defined(__clang__)
+  asm volatile("" : : "r"(sink) : "memory");
+#endif
+  if ((sink & 0xffff000000000000ull) == 0xffff000000000000ull) {
+    __builtin_trap();
+  }
+}
+
+template <Opcode Op, unsigned Variant>
+VMP_NOINLINE void vm1_handler_entry(Vm1DispatchFrame& frame) {
+  emit_vm1_polymorphic_junk<Op, Variant>();
+  execute_vm1_opcode(frame, Op);
+}
+
+template <Opcode Op>
+constexpr std::uint8_t selected_vm1_variant() {
+  return vm1_variant_for_opcode_word(static_cast<std::uint16_t>(Op));
+}
+
+template <Opcode Op>
+Vm1HandlerFn select_vm1_handler() {
+  if constexpr (selected_vm1_variant<Op>() == 0u) {
+    return &vm1_handler_entry<Op, 0u>;
+  } else if constexpr (selected_vm1_variant<Op>() == 1u) {
+    return &vm1_handler_entry<Op, 1u>;
+  }
+  return &vm1_handler_entry<Op, 2u>;
+}
+
+Vm1HandlerFn vm1_handler_for_opcode(Opcode opcode) {
+  switch (opcode) {
+#define VMP_VM1_OPCODE(name) case Opcode::name: return select_vm1_handler<Opcode::name>();
+#include "polymorphic_opcode_list.inc"
+#undef VMP_VM1_OPCODE
+    default: return nullptr;
+  }
+}
+
+Vm1HandlerCatalog build_vm1_handler_catalog() {
+  struct PendingEntry {
+    std::uint64_t shuffle_key = 0;
+    Vm1HandlerRuntimeEntry entry{};
+  };
+
+  Vm1HandlerCatalog catalog;
+  catalog.layout.build_seed = kVm1PolymorphicBuildSeed;
+  const auto& canonical = canonical_opcode_sequence();
+  std::vector<PendingEntry> pending;
+  pending.reserve(canonical.size());
+  for (std::size_t i = 0; i < canonical.size(); ++i) {
+    const auto opcode = canonical[i];
+    const auto fn = vm1_handler_for_opcode(opcode);
+    PolymorphicHandlerInfo info;
+    info.opcode = opcode;
+    info.canonical_index = static_cast<std::uint16_t>(i);
+    info.variant = vm1_variant_for_opcode_word(static_cast<std::uint16_t>(opcode));
+    info.junk_length = vm1_junk_length_for_opcode_word(static_cast<std::uint16_t>(opcode));
+    info.entry = vm1_handler_entry_identity(fn);
+    pending.push_back(PendingEntry{
+        mix_u64(kVm1PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(static_cast<std::uint16_t>(opcode)) << 24u) ^ i),
+        Vm1HandlerRuntimeEntry{info, fn}});
+  }
+  std::sort(pending.begin(), pending.end(), [](const PendingEntry& lhs, const PendingEntry& rhs) {
+    if (lhs.shuffle_key != rhs.shuffle_key) {
+      return lhs.shuffle_key < rhs.shuffle_key;
+    }
+    return static_cast<std::uint16_t>(lhs.entry.info.opcode) < static_cast<std::uint16_t>(rhs.entry.info.opcode);
+  });
+
+  catalog.runtime_entries.reserve(pending.size());
+  catalog.layout.entries.reserve(pending.size());
+  for (std::size_t shuffled_index = 0; shuffled_index < pending.size(); ++shuffled_index) {
+    auto entry = pending[shuffled_index].entry;
+    entry.info.shuffled_index = static_cast<std::uint16_t>(shuffled_index);
+    entry.info.fingerprint = vm1_handler_fingerprint_value(static_cast<std::uint16_t>(entry.info.opcode),
+                                                           entry.info.canonical_index,
+                                                           entry.info.shuffled_index);
+    catalog.lookup_by_opcode.emplace_back(static_cast<std::uint16_t>(entry.info.opcode), shuffled_index);
+    catalog.layout.layout_fingerprint =
+        mix_u64(catalog.layout.layout_fingerprint ^ entry.info.fingerprint ^
+                (static_cast<std::uint64_t>(entry.info.variant) << 8u) ^ entry.info.junk_length);
+    catalog.runtime_entries.push_back(entry);
+    catalog.layout.entries.push_back(entry.info);
+  }
+  std::sort(catalog.lookup_by_opcode.begin(), catalog.lookup_by_opcode.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+  return catalog;
+}
+
+const Vm1HandlerCatalog& vm1_handler_catalog() {
+  static const Vm1HandlerCatalog catalog = build_vm1_handler_catalog();
+  return catalog;
+}
+
+void execute_vm1_opcode(Vm1DispatchFrame& frame, Opcode opcode) {
+  auto& context = frame.context;
+  auto& cursor = frame.cursor;
+  auto& halted = frame.halted;
+  auto& control_flow_changed = frame.control_flow_changed;
+  switch (opcode) {
       case Opcode::nop:
         break;
       case Opcode::breakpoint:
@@ -785,9 +961,43 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
         break;
       }
       default:
-        context.pc = instruction_pc;
+        context.pc = frame.instruction_pc;
         raise_trap(context, VmTrapCode::unknown_opcode, "vm1: unknown opcode", "vm1_unknown_opcode");
+    
+  }
+}
+
+BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t start_pc) {
+  if (context.module == nullptr) {
+    throw VmException(VmTrapCode::invalid_module, 0, "vm1: null module");
+  }
+  (void)vmp::runtime::stack_probe::default_stack_probe().maybe_probe(
+      vmp::runtime::stack_probe::ProbeRequest{
+          vmp::runtime::stack_probe::selector_low12(reinterpret_cast<std::uintptr_t>(context.module) ^ context.module->id()),
+          vmp::runtime::stack_probe::ProbeTriggerSite::vm1_handler_dispatch,
+          vmp::runtime::stack_probe::kDefaultMaxFrames},
+      context.audit_dispatcher);
+  auto dispatch_scope = vmp::runtime::cryptor::vm1::begin_dispatch(*context.module);
+  if (start_pc >= context.module->code.size()) {
+    throw VmException(VmTrapCode::invalid_module, start_pc, "vm1: pc out of range");
+  }
+  context.execution_halted = false;
+  context.pc = start_pc;
+  bool halted = false;
+  bool control_flow_changed = false;
+  do {
+    control_flow_changed = false;
+    const std::uint32_t instruction_pc = context.pc;
+    std::size_t cursor = context.pc;
+    const auto opcode = static_cast<Opcode>(read_u16(*context.module, cursor));
+    context.pc = static_cast<std::uint32_t>(cursor);
+    const auto* handler_entry = vm1_handler_catalog().resolve(opcode);
+    if (handler_entry == nullptr) {
+      context.pc = instruction_pc;
+      raise_trap(context, VmTrapCode::unknown_opcode, "vm1: unknown opcode", "vm1_unknown_opcode");
     }
+    Vm1DispatchFrame frame{context, instruction_pc, cursor, halted, control_flow_changed};
+    handler_entry->fn(frame);
     if (!halted && !control_flow_changed) {
       context.pc = static_cast<std::uint32_t>(cursor);
     }
@@ -798,6 +1008,14 @@ BlockExecutionResult execute_basic_block(Vm1Context& context, std::uint32_t star
 }
 
 }  // namespace
+
+const PolymorphicHandlerLayout& polymorphic_handler_layout() { return vm1_handler_catalog().layout; }
+
+std::uint64_t polymorphic_handler_layout_fingerprint() noexcept {
+  return vm1_handler_catalog().layout.layout_fingerprint;
+}
+
+std::uint64_t polymorphic_handler_build_seed() noexcept { return vm1_handler_catalog().layout.build_seed; }
 
 ExecutionResult Vm1Interpreter::execute(Vm1Context& context) {
   if (context.module == nullptr) {

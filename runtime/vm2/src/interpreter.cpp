@@ -1,5 +1,7 @@
 #include <vmp/runtime/vm2/vm2.h>
 
+#include <array>
+#include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <cstdint>
@@ -228,45 +230,207 @@ vmp::runtime::bridge::Domain bridge_domain_from_byte(std::uint8_t raw) {
 
 Vm2Interpreter::Vm2Interpreter() { assert(vmp::runtime::vm1::handler_table_identity() != handler_table_identity()); }
 
-ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> stop_after_frame_depth) {
-  if (context.module == nullptr) throw Vm2Exception(0, "vm2: null module");
-  if (context.pc > context.module->code.size()) throw Vm2Exception(context.pc, "vm2: entry pc out of range");
-  context.execution_halted = false;
-  try {
-    while (!context.execution_halted) {
-      (void)vmp::runtime::stack_probe::default_stack_probe().maybe_probe(
-          vmp::runtime::stack_probe::ProbeRequest{
-              vmp::runtime::stack_probe::selector_low12(reinterpret_cast<std::uintptr_t>(context.module) ^ context.module->id()),
-              vmp::runtime::stack_probe::ProbeTriggerSite::vm2_handler_dispatch,
-              vmp::runtime::stack_probe::kDefaultMaxFrames},
-          context.audit_dispatcher);
-      auto dispatch_scope = vmp::runtime::cryptor::vm2::begin_dispatch(*context.module);
-      if (context.pc >= context.module->code.size()) throw Vm2Exception(context.pc, "vm2: pc out of range");
-#if VMP_WITH_JIT
-      if (context.pc == context.jit_skip_entry_once_pc) {
-        context.jit_skip_entry_once_pc = 0xFFFFFFFFu;
-      } else if (context.module->is_function_entry_pc(context.pc)) {
-        const auto entry_pc = context.pc;
-        const auto hit_count = context.module->note_function_hit(entry_pc);
-        (void)vmp::runtime::jit::Vm2Jit::instance().compile_if_needed(*context.module, context, entry_pc, hit_count);
-        if (context.module->function_jit_entry(entry_pc) != 0u) {
-          const auto next_pc = vmp::runtime::jit::Vm2Jit::instance().dispatch(context, entry_pc);
-          if (next_pc != std::numeric_limits<std::uint32_t>::max()) {
-            context.pc = next_pc;
-            if (context.execution_halted || (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth)) {
-              return ExecutionResult{context.r[0], context.d[0], context.q[0]};
-            }
-            continue;
-          }
-        }
-      }
+
+#if defined(_MSC_VER)
+#define VMP_NOINLINE __declspec(noinline)
+#else
+#define VMP_NOINLINE __attribute__((noinline))
 #endif
-      bool control_flow_changed = false;
-      const auto instruction_pc = context.pc;
-      std::size_t cursor = context.pc;
-      const auto opcode = static_cast<Opcode>(read_u16(*context.module, cursor));
-      context.pc = static_cast<std::uint32_t>(cursor);
-      switch (opcode) {
+
+#ifndef VMP_POLYMORPHIC_HANDLER_SEED
+#define VMP_POLYMORPHIC_HANDLER_SEED 0
+#endif
+
+constexpr std::uint64_t kVm2PolymorphicBuildSeed =
+    static_cast<std::uint64_t>(VMP_POLYMORPHIC_HANDLER_SEED) ^ 0x56324d3200000001ull;
+
+constexpr std::uint64_t mix_u64(std::uint64_t value) {
+  value += 0x9e3779b97f4a7c15ull;
+  value = (value ^ (value >> 30u)) * 0xbf58476d1ce4e5b9ull;
+  value = (value ^ (value >> 27u)) * 0x94d049bb133111ebull;
+  return value ^ (value >> 31u);
+}
+
+constexpr std::uint8_t vm2_variant_for_opcode_word(std::uint16_t word) {
+  return static_cast<std::uint8_t>(mix_u64(kVm2PolymorphicBuildSeed ^ static_cast<std::uint64_t>(word)) % 3ull);
+}
+
+constexpr std::uint8_t vm2_junk_length_for_opcode_word(std::uint16_t word) {
+  return static_cast<std::uint8_t>(4u + (mix_u64(kVm2PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(word) << 11u)) % 29ull));
+}
+
+constexpr std::uint64_t vm2_handler_fingerprint_value(std::uint16_t word,
+                                                      std::size_t canonical_index,
+                                                      std::size_t shuffled_index) {
+  return mix_u64(kVm2PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(word) << 32u) ^
+                 (static_cast<std::uint64_t>(canonical_index) << 16u) ^ static_cast<std::uint64_t>(shuffled_index));
+}
+
+struct Vm2DispatchFrame {
+  Vm2Context& context;
+  std::uint32_t instruction_pc;
+  std::size_t& cursor;
+  bool& control_flow_changed;
+  const std::optional<std::size_t>& stop_after_frame_depth;
+  std::optional<ExecutionResult>& early_return;
+};
+
+using Vm2HandlerFn = void (*)(Vm2DispatchFrame&);
+
+struct Vm2HandlerRuntimeEntry {
+  PolymorphicHandlerInfo info{};
+  Vm2HandlerFn fn = nullptr;
+};
+
+const void* vm2_handler_entry_identity(Vm2HandlerFn fn) noexcept {
+  union {
+    Vm2HandlerFn fn;
+    const void* ptr;
+  } caster{fn};
+  return caster.ptr;
+}
+
+struct Vm2HandlerCatalog {
+  PolymorphicHandlerLayout layout{};
+  std::vector<Vm2HandlerRuntimeEntry> runtime_entries;
+  std::vector<std::pair<std::uint16_t, std::size_t>> lookup_by_opcode;
+
+  const Vm2HandlerRuntimeEntry* resolve(Opcode opcode) const {
+    const auto word = static_cast<std::uint16_t>(opcode);
+    const auto it = std::lower_bound(
+        lookup_by_opcode.begin(), lookup_by_opcode.end(), word,
+        [](const auto& lhs, std::uint16_t rhs) { return lhs.first < rhs; });
+    if (it == lookup_by_opcode.end() || it->first != word) {
+      return nullptr;
+    }
+    return &runtime_entries[it->second];
+  }
+};
+
+void execute_vm2_opcode(Vm2DispatchFrame& frame, Opcode opcode);
+
+template <Opcode Op, unsigned Variant>
+VMP_NOINLINE void emit_vm2_polymorphic_junk() {
+  constexpr auto opcode_word = static_cast<std::uint16_t>(Op);
+  constexpr auto junk_length = vm2_junk_length_for_opcode_word(opcode_word);
+  constexpr auto salt_a = mix_u64(kVm2PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(opcode_word) << 9u) ^ Variant);
+  constexpr auto salt_b = mix_u64(kVm2PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(junk_length) << 17u) ^
+                                  (static_cast<std::uint64_t>(Variant) << 33u));
+  volatile std::uint64_t sink = salt_a ^ salt_b ^ junk_length;
+  if constexpr (Variant == 0u) {
+    sink += salt_a;
+    sink ^= salt_b;
+    sink -= salt_a;
+  } else if constexpr (Variant == 1u) {
+    sink ^= salt_a;
+    sink += static_cast<std::uint64_t>(junk_length) * 0x101ull;
+    sink ^= (salt_b >> 1u);
+  } else {
+    sink += (salt_a ^ salt_b);
+    sink = (sink << 7u) | (sink >> 57u);
+    sink ^= salt_b;
+  }
+#if defined(__GNUC__) || defined(__clang__)
+  asm volatile("" : : "r"(sink) : "memory");
+#endif
+  if ((sink & 0xffff000000000000ull) == 0xffff000000000000ull) {
+    __builtin_trap();
+  }
+}
+
+template <Opcode Op, unsigned Variant>
+VMP_NOINLINE void vm2_handler_entry(Vm2DispatchFrame& frame) {
+  emit_vm2_polymorphic_junk<Op, Variant>();
+  execute_vm2_opcode(frame, Op);
+}
+
+template <Opcode Op>
+constexpr std::uint8_t selected_vm2_variant() {
+  return vm2_variant_for_opcode_word(static_cast<std::uint16_t>(Op));
+}
+
+template <Opcode Op>
+Vm2HandlerFn select_vm2_handler() {
+  if constexpr (selected_vm2_variant<Op>() == 0u) {
+    return &vm2_handler_entry<Op, 0u>;
+  } else if constexpr (selected_vm2_variant<Op>() == 1u) {
+    return &vm2_handler_entry<Op, 1u>;
+  }
+  return &vm2_handler_entry<Op, 2u>;
+}
+
+Vm2HandlerFn vm2_handler_for_opcode(Opcode opcode) {
+  switch (opcode) {
+#define VMP_VM2_OPCODE(name) case Opcode::name: return select_vm2_handler<Opcode::name>();
+#include "polymorphic_opcode_list.inc"
+#undef VMP_VM2_OPCODE
+    default: return nullptr;
+  }
+}
+
+Vm2HandlerCatalog build_vm2_handler_catalog() {
+  struct PendingEntry {
+    std::uint64_t shuffle_key = 0;
+    Vm2HandlerRuntimeEntry entry{};
+  };
+
+  Vm2HandlerCatalog catalog;
+  catalog.layout.build_seed = kVm2PolymorphicBuildSeed;
+  const auto& canonical = canonical_opcode_sequence();
+  std::vector<PendingEntry> pending;
+  pending.reserve(canonical.size());
+  for (std::size_t i = 0; i < canonical.size(); ++i) {
+    const auto opcode = canonical[i];
+    const auto fn = vm2_handler_for_opcode(opcode);
+    PolymorphicHandlerInfo info;
+    info.opcode = opcode;
+    info.canonical_index = static_cast<std::uint16_t>(i);
+    info.variant = vm2_variant_for_opcode_word(static_cast<std::uint16_t>(opcode));
+    info.junk_length = vm2_junk_length_for_opcode_word(static_cast<std::uint16_t>(opcode));
+    info.entry = vm2_handler_entry_identity(fn);
+    pending.push_back(PendingEntry{
+        mix_u64(kVm2PolymorphicBuildSeed ^ (static_cast<std::uint64_t>(static_cast<std::uint16_t>(opcode)) << 24u) ^ i),
+        Vm2HandlerRuntimeEntry{info, fn}});
+  }
+  std::sort(pending.begin(), pending.end(), [](const PendingEntry& lhs, const PendingEntry& rhs) {
+    if (lhs.shuffle_key != rhs.shuffle_key) {
+      return lhs.shuffle_key < rhs.shuffle_key;
+    }
+    return static_cast<std::uint16_t>(lhs.entry.info.opcode) < static_cast<std::uint16_t>(rhs.entry.info.opcode);
+  });
+
+  catalog.runtime_entries.reserve(pending.size());
+  catalog.layout.entries.reserve(pending.size());
+  for (std::size_t shuffled_index = 0; shuffled_index < pending.size(); ++shuffled_index) {
+    auto entry = pending[shuffled_index].entry;
+    entry.info.shuffled_index = static_cast<std::uint16_t>(shuffled_index);
+    entry.info.fingerprint = vm2_handler_fingerprint_value(static_cast<std::uint16_t>(entry.info.opcode),
+                                                           entry.info.canonical_index,
+                                                           entry.info.shuffled_index);
+    catalog.lookup_by_opcode.emplace_back(static_cast<std::uint16_t>(entry.info.opcode), shuffled_index);
+    catalog.layout.layout_fingerprint =
+        mix_u64(catalog.layout.layout_fingerprint ^ entry.info.fingerprint ^
+                (static_cast<std::uint64_t>(entry.info.variant) << 8u) ^ entry.info.junk_length);
+    catalog.runtime_entries.push_back(entry);
+    catalog.layout.entries.push_back(entry.info);
+  }
+  std::sort(catalog.lookup_by_opcode.begin(), catalog.lookup_by_opcode.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+  return catalog;
+}
+
+const Vm2HandlerCatalog& vm2_handler_catalog() {
+  static const Vm2HandlerCatalog catalog = build_vm2_handler_catalog();
+  return catalog;
+}
+
+void execute_vm2_opcode(Vm2DispatchFrame& frame, Opcode opcode) {
+  auto& context = frame.context;
+  auto& cursor = frame.cursor;
+  auto& control_flow_changed = frame.control_flow_changed;
+  auto& stop_after_frame_depth = frame.stop_after_frame_depth;
+  auto& early_return = frame.early_return;
+  switch (opcode) {
         case Opcode::nop:
           break;
         case Opcode::brk:
@@ -274,9 +438,9 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           break;
         case Opcode::ftrap: {
           const auto code = read_u32(*context.module, cursor);
-          context.pc = instruction_pc;
+          context.pc = frame.instruction_pc;
           dispatch_audit(context, "vm2_trap", "ftrap opcode executed");
-          throw Vm2Exception(instruction_pc, "vm2 trap code=" + std::to_string(code));
+          throw Vm2Exception(frame.instruction_pc, "vm2 trap code=" + std::to_string(code));
         }
         case Opcode::ildimm: {
           const auto dst = fetch_byte(*context.module, cursor++);
@@ -298,7 +462,7 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
         case Opcode::vldimm: {
           const auto dst = fetch_byte(*context.module, cursor++);
           const auto index = read_u32(*context.module, cursor);
-          if (index >= context.module->const_pool.size()) throw Vm2Exception(instruction_pc, "vm2: const pool index out of range");
+          if (index >= context.module->const_pool.size()) throw Vm2Exception(frame.instruction_pc, "vm2: const pool index out of range");
           Vec128 value{};
           for (int i = 0; i < 8; ++i) value.u64.lo |= static_cast<std::uint64_t>(context.module->const_pool[index].bytes[static_cast<std::size_t>(i)]) << (8 * i);
           for (int i = 0; i < 8; ++i) value.u64.hi |= static_cast<std::uint64_t>(context.module->const_pool[index].bytes[8 + static_cast<std::size_t>(i)]) << (8 * i);
@@ -357,11 +521,11 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
               result = lhs * rhs;
               break;
             case Opcode::idiv:
-              if (rhs == 0) throw Vm2DivByZero(instruction_pc, "vm2: divide by zero");
+              if (rhs == 0) throw Vm2DivByZero(frame.instruction_pc, "vm2: divide by zero");
               result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lhs) / static_cast<std::int64_t>(rhs));
               break;
             case Opcode::imod:
-              if (rhs == 0) throw Vm2DivByZero(instruction_pc, "vm2: modulo by zero");
+              if (rhs == 0) throw Vm2DivByZero(frame.instruction_pc, "vm2: modulo by zero");
               result = static_cast<std::uint64_t>(static_cast<std::int64_t>(lhs) % static_cast<std::int64_t>(rhs));
               break;
             case Opcode::iand: result = lhs & rhs; break;
@@ -651,7 +815,8 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           leave_call(context, context.execution_halted);
           control_flow_changed = true;
           if (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth) {
-            return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+            early_return = ExecutionResult{context.r[0], context.d[0], context.q[0]};
+            return;
           }
           break;
         case Opcode::pcall: {
@@ -669,7 +834,8 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
             leave_call(context, context.execution_halted);
             control_flow_changed = true;
             if (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth) {
-              return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+              early_return = ExecutionResult{context.r[0], context.d[0], context.q[0]};
+              return;
             }
           }
           break;
@@ -687,7 +853,7 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           const auto int_count = fetch_byte(*context.module, cursor++);
           const auto float_count = fetch_byte(*context.module, cursor++);
           const auto opaque_count = fetch_byte(*context.module, cursor++);
-          if (context.bridge_registry == nullptr) throw Vm2Exception(instruction_pc, "vm2: bridge registry not configured");
+          if (context.bridge_registry == nullptr) throw Vm2Exception(frame.instruction_pc, "vm2: bridge registry not configured");
           if (bridge_domain_from_byte(domain) == vmp::runtime::bridge::Domain::vm1) {
             vmp::runtime::cryptor::vm2::notify_domain_switch(*context.module);
           }
@@ -715,7 +881,8 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           leave_call(context, context.execution_halted);
           control_flow_changed = true;
           if (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth) {
-            return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+            early_return = ExecutionResult{context.r[0], context.d[0], context.q[0]};
+            return;
           }
           break;
         case Opcode::tsload: {
@@ -751,9 +918,62 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
           break;
         }
         default:
-          context.pc = instruction_pc;
+          context.pc = frame.instruction_pc;
           dispatch_audit(context, "vm2_unknown_opcode", "unknown opcode");
-          throw Vm2UnknownOpcode(instruction_pc, "vm2: unknown opcode");
+          throw Vm2UnknownOpcode(frame.instruction_pc, "vm2: unknown opcode");
+      
+  }
+}
+
+ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> stop_after_frame_depth) {
+  if (context.module == nullptr) throw Vm2Exception(0, "vm2: null module");
+  if (context.pc > context.module->code.size()) throw Vm2Exception(context.pc, "vm2: entry pc out of range");
+  context.execution_halted = false;
+  try {
+    while (!context.execution_halted) {
+      (void)vmp::runtime::stack_probe::default_stack_probe().maybe_probe(
+          vmp::runtime::stack_probe::ProbeRequest{
+              vmp::runtime::stack_probe::selector_low12(reinterpret_cast<std::uintptr_t>(context.module) ^ context.module->id()),
+              vmp::runtime::stack_probe::ProbeTriggerSite::vm2_handler_dispatch,
+              vmp::runtime::stack_probe::kDefaultMaxFrames},
+          context.audit_dispatcher);
+      auto dispatch_scope = vmp::runtime::cryptor::vm2::begin_dispatch(*context.module);
+      if (context.pc >= context.module->code.size()) throw Vm2Exception(context.pc, "vm2: pc out of range");
+#if VMP_WITH_JIT
+      if (context.pc == context.jit_skip_entry_once_pc) {
+        context.jit_skip_entry_once_pc = 0xFFFFFFFFu;
+      } else if (context.module->is_function_entry_pc(context.pc)) {
+        const auto entry_pc = context.pc;
+        const auto hit_count = context.module->note_function_hit(entry_pc);
+        (void)vmp::runtime::jit::Vm2Jit::instance().compile_if_needed(*context.module, context, entry_pc, hit_count);
+        if (context.module->function_jit_entry(entry_pc) != 0u) {
+          const auto next_pc = vmp::runtime::jit::Vm2Jit::instance().dispatch(context, entry_pc);
+          if (next_pc != std::numeric_limits<std::uint32_t>::max()) {
+            context.pc = next_pc;
+            if (context.execution_halted || (stop_after_frame_depth.has_value() && context.frames_.size() == *stop_after_frame_depth)) {
+              return ExecutionResult{context.r[0], context.d[0], context.q[0]};
+            }
+            continue;
+          }
+        }
+      }
+#endif
+      bool control_flow_changed = false;
+      const auto instruction_pc = context.pc;
+      std::size_t cursor = context.pc;
+      const auto opcode = static_cast<Opcode>(read_u16(*context.module, cursor));
+      context.pc = static_cast<std::uint32_t>(cursor);
+      const auto* handler_entry = vm2_handler_catalog().resolve(opcode);
+      if (handler_entry == nullptr) {
+        context.pc = instruction_pc;
+        dispatch_audit(context, "vm2_unknown_opcode", "unknown opcode");
+        throw Vm2UnknownOpcode(instruction_pc, "vm2: unknown opcode");
+      }
+      std::optional<ExecutionResult> early_return;
+      Vm2DispatchFrame frame{context, instruction_pc, cursor, control_flow_changed, stop_after_frame_depth, early_return};
+      handler_entry->fn(frame);
+      if (early_return.has_value()) {
+        return *early_return;
       }
       if (!context.execution_halted && !control_flow_changed) context.pc = static_cast<std::uint32_t>(cursor);
     }
@@ -770,6 +990,14 @@ ExecutionResult execute_impl(Vm2Context& context, std::optional<std::size_t> sto
     throw;
   }
 }
+
+const PolymorphicHandlerLayout& polymorphic_handler_layout() { return vm2_handler_catalog().layout; }
+
+std::uint64_t polymorphic_handler_layout_fingerprint() noexcept {
+  return vm2_handler_catalog().layout.layout_fingerprint;
+}
+
+std::uint64_t polymorphic_handler_build_seed() noexcept { return vm2_handler_catalog().layout.build_seed; }
 
 ExecutionResult Vm2Interpreter::execute(Vm2Context& context) {
   (void)vmp::runtime::env_integrity::verify_sensitive_domain_entry("vm2", context.audit_dispatcher);

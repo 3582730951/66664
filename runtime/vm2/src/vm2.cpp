@@ -1865,7 +1865,7 @@ std::string disassemble_module(const Vm2Module& module) {
   return out.str();
 }
 
-const void* handler_table_identity() noexcept { return &kVm2HandlerTableIdentity; }
+const void* handler_table_identity() noexcept { return polymorphic_handler_layout().entries.data(); }
 
 const char* Facade::status() const noexcept { return "vm2_ready"; }
 

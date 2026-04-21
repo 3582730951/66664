@@ -9,6 +9,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(VMP_WITH_JIT "Enable JIT placeholder targets" ON)
 option(VMP_WITH_VM2 "Enable VM2 placeholder targets" ON)
+set(VMP_POLYMORPHIC_HANDLER_SEED "" CACHE STRING "64-bit seed for polymorphic handler layout/variants")
+if(VMP_POLYMORPHIC_HANDLER_SEED STREQUAL "")
+  string(TIMESTAMP VMP_POLYMORPHIC_HANDLER_SEED "%s" UTC)
+endif()
 
 include(cmake/third_party.cmake)
 vmp_require_nlohmann_json()
@@ -48,6 +52,7 @@ target_compile_definitions(vmp_build_options INTERFACE
   VMP_WITH_VM2=$<BOOL:${VMP_WITH_VM2}>
   VMP_PLATFORM_STR="${VMP_PLATFORM}"
   VMP_ARCH_STR="${VMP_ARCH}"
+  VMP_POLYMORPHIC_HANDLER_SEED=${VMP_POLYMORPHIC_HANDLER_SEED}
 )
 if(MSVC)
   target_compile_options(vmp_build_options INTERFACE /Oy-)

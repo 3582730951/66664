@@ -2315,11 +2315,7 @@ std::string disassemble_module(const Vm1Module& module) {
 }
 
 
-namespace {
-inline constexpr int kVm1HandlerTableIdentity = 0x56314D31;
-}
-
-const void* handler_table_identity() noexcept { return &kVm1HandlerTableIdentity; }
+const void* handler_table_identity() noexcept { return polymorphic_handler_layout().entries.data(); }
 
 const char* Facade::status() const noexcept { return "vm1_ready"; }
 

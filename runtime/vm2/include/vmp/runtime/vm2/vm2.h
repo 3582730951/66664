@@ -206,6 +206,25 @@ std::string disassemble_module(const Vm2Module& module);
 std::string opcode_name(Opcode opcode);
 const std::vector<Opcode>& canonical_opcode_sequence();
 const void* handler_table_identity() noexcept;
+struct PolymorphicHandlerInfo {
+  Opcode opcode = Opcode::nop;
+  std::uint16_t canonical_index = 0;
+  std::uint16_t shuffled_index = 0;
+  std::uint8_t variant = 0;
+  std::uint8_t junk_length = 0;
+  std::uint64_t fingerprint = 0;
+  const void* entry = nullptr;
+};
+
+struct PolymorphicHandlerLayout {
+  std::uint64_t build_seed = 0;
+  std::uint64_t layout_fingerprint = 0;
+  std::vector<PolymorphicHandlerInfo> entries;
+};
+
+const PolymorphicHandlerLayout& polymorphic_handler_layout();
+std::uint64_t polymorphic_handler_layout_fingerprint() noexcept;
+std::uint64_t polymorphic_handler_build_seed() noexcept;
 
 struct Facade {
   const char* status() const noexcept;
