@@ -36,6 +36,7 @@ struct Instruction {
 
 constexpr std::uint8_t kTmp0 = 30;
 constexpr std::uint8_t kTmp1 = 31;
+constexpr std::uint8_t kTmp2 = 29;
 
 std::uint8_t reg_index(int reg) {
   static constexpr std::array<std::uint8_t, 16> map{{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
@@ -147,7 +148,12 @@ struct Decoder {
         insn.dst.kind = Operand::Kind::reg; insn.dst.reg = reg_index(rm); insn.dst.width = opw;
         insn.src.kind = Operand::Kind::imm; insn.src.width = 1; insn.src.imm = next();
         insn.subop = subop;
-        insn.mnemonic = (subop == 4) ? "shl" : (subop == 5) ? "shr" : (subop == 7) ? "sar" : "badshift";
+        insn.mnemonic = (subop == 0) ? "rol"
+                        : (subop == 1) ? "ror"
+                        : (subop == 4) ? "shl"
+                        : (subop == 5) ? "shr"
+                        : (subop == 7) ? "sar"
+                                        : "badshift";
         break;
       }
       case 0x69:
@@ -424,6 +430,25 @@ common::LiftedFunction X64Lifter::lift(const common::FunctionView& view) const {
       emit_load_operand(text, insn.dst, kTmp0);
       emit_load_operand(text, insn.src, kTmp1);
       text << "  " << insn.mnemonic << " vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp1) << "\n";
+      emit_store_operand(text, insn.dst, kTmp0);
+    } else if (insn.mnemonic == "rol" || insn.mnemonic == "ror") {
+      const auto bit_width = static_cast<unsigned>(insn.dst.width) * 8u;
+      emit_load_operand(text, insn.dst, kTmp0);
+      emit_load_operand(text, insn.src, kTmp1);
+      if (insn.mnemonic == "rol") {
+        text << "  shl vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp1) << "\n";
+      } else {
+        text << "  shr vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp1) << "\n";
+      }
+      text << "  ldi_u64 vr" << unsigned(kTmp2) << ", " << bit_width << "\n";
+      text << "  sub vr" << unsigned(kTmp2) << ", vr" << unsigned(kTmp2) << ", vr" << unsigned(kTmp1) << "\n";
+      emit_load_operand(text, insn.dst, kTmp1);
+      if (insn.mnemonic == "rol") {
+        text << "  shr vr" << unsigned(kTmp1) << ", vr" << unsigned(kTmp1) << ", vr" << unsigned(kTmp2) << "\n";
+      } else {
+        text << "  shl vr" << unsigned(kTmp1) << ", vr" << unsigned(kTmp1) << ", vr" << unsigned(kTmp2) << "\n";
+      }
+      text << "  or vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp0) << ", vr" << unsigned(kTmp1) << "\n";
       emit_store_operand(text, insn.dst, kTmp0);
     } else if (insn.mnemonic == "cmp") {
       last_cmp_lhs = insn.dst;

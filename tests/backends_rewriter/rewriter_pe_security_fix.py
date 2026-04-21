@@ -223,8 +223,10 @@ def main() -> None:
         if sec['name'] not in baseline_names and re.fullmatch(r'\.[a-z0-9]{7}', sec['name'])
     }
     new_randomized = sorted(protected_randomized - stage1_randomized)
-    if len(new_randomized) != 2:
-        fail(f'expected exactly 2 new randomized sections after trampoline pass, got {new_randomized}')
+    if len(new_randomized) != 3:
+        fail(f'expected exactly 3 new randomized sections after trampoline pass, got {new_randomized}')
+    if not any(protected_pe['data'][sec['raw_ptr']:sec['raw_ptr'] + sec['raw_size']].startswith(b'VMPC') for sec in randomized):
+        fail('missing serialized VMPC section in protected PE image')
     leaked_fixed = [name for name in ('.vmpload', '.vmpvm', '.vmptrmp', '.vmpcode', '.vmpstrings') if name in {sec['name'] for sec in protected_pe['sections']}]
     if leaked_fixed:
         fail(f'fixed VMP section names still visible: {leaked_fixed}')

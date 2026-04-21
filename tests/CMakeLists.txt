@@ -678,6 +678,10 @@ add_test(NAME runtime_metadata_encrypt_pe
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime_metadata_encrypt/metadata_encrypt_pe.py $<TARGET_FILE:vmp-protect> $<TARGET_FILE:vmp-trampoline-inject> ${CMAKE_BINARY_DIR})
 set_tests_properties(runtime_metadata_encrypt_pe PROPERTIES PASS_REGULAR_EXPRESSION "runtime_metadata_encrypt_pe OK" SKIP_REGULAR_EXPRESSION "SKIP_REASON")
 
+add_test(NAME rewriter_pe_lifting
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/runtime_pe_lifting/rewriter_pe_lifting.py $<TARGET_FILE:vmp-protect> $<TARGET_FILE:vmp-trampoline-inject> ${CMAKE_BINARY_DIR})
+set_tests_properties(rewriter_pe_lifting PROPERTIES PASS_REGULAR_EXPRESSION "rewriter_pe_lifting OK" SKIP_REGULAR_EXPRESSION "SKIP_REASON")
+
 add_test(NAME rewriter_macho_roundtrip
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/backends_rewriter/rewriter_macho_roundtrip.py $<TARGET_FILE:vmp-protect> ${CMAKE_BINARY_DIR})
 set_tests_properties(rewriter_macho_roundtrip PROPERTIES PASS_REGULAR_EXPRESSION "rewriter_macho_roundtrip OK")

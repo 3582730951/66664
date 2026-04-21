@@ -25,7 +25,7 @@ struct RewriteOptions {
   std::filesystem::path strings_kdf_path;
   std::filesystem::path vm1_module_path;
   std::filesystem::path vm2_module_path;
-  bool enable_lift = false;
+  bool enable_lift = true;
   bool enable_trampoline = false;
   std::string trampoline_dispatcher_symbol = vmp::runtime::strings::obf::decode(VMP_OBFSTR("vmp_dispatch_token_sysv2"));
   std::vector<std::uint8_t> trampoline_key_context_id;

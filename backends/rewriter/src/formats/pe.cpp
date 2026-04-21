@@ -10,6 +10,7 @@
 #include <unordered_map>
 
 #include <vmp/arch/x64/ir.h>
+#include <vmp/arch/x64/x64.h>
 
 #include "../internal/common.h"
 #include "../internal/metadata_obfuscation.h"
@@ -81,6 +82,14 @@ struct TrampolineRecord {
   std::uint32_t bridge_rva = 0;
   std::uint32_t code_size = 0;
   vmp::runtime::trampoline::TokenBytes token{};
+};
+
+struct PeLiftPlan {
+  bool lifted = false;
+  std::uint64_t bundle_id = 0;
+  std::uint8_t domain = 1;
+  std::string symbol_id;
+  detail::json diagnostics = detail::json::array();
 };
 
 struct ImageImportDescriptor {
@@ -528,6 +537,28 @@ std::vector<std::uint8_t> x64_nop_fill(std::size_t size) {
   return std::vector<std::uint8_t>(size, 0x90);
 }
 
+detail::json lift_diag_json(const std::vector<vmp::arch::common::Diagnostic>& diags) {
+  detail::json out = detail::json::array();
+  for (const auto& diag : diags) {
+    out.push_back({{"offset", diag.offset}, {"detail", diag.detail}});
+  }
+  return out;
+}
+
+std::unique_ptr<vmp::arch::common::IsaLifter> make_lifter(const ParsedPe& pe,
+                                                          const detail::BinaryPolicyTarget& target,
+                                                          vmp::arch::common::CallingConvention& cc_out) {
+  using namespace vmp::arch;
+  switch (pe.file_header.machine) {
+    case 0x8664u:
+      cc_out = vmp::arch::common::CallingConvention::msvc_x64;
+      return std::make_unique<x64::X64Lifter>(target.vm2 ? vmp::arch::common::TargetDomain::vm2
+                                                          : vmp::arch::common::TargetDomain::vm1);
+    default:
+      return nullptr;
+  }
+}
+
 void patch_last_rel32(std::vector<std::uint8_t>& encoding, std::int64_t disp) {
   if (disp < static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::min()) ||
       disp > static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()) || encoding.size() < 4u) {
@@ -942,6 +973,8 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
 
   std::vector<detail::BinaryPolicyTarget> thunk_targets;
   std::vector<detail::StringRecordRequest> string_requests;
+  std::vector<detail::VmpCodeRecord> vmpcode_records;
+  std::unordered_map<std::string, PeLiftPlan> lift_plans;
   std::set<std::string> resolved;
 
   for (const auto& target : targets) {
@@ -984,6 +1017,69 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
   }
 
   const auto metadata_key_context = resolve_trampoline_key_context(options, input.source_path.string(), parsed.file_header.machine);
+  std::uint64_t next_bundle_id = 1;
+  std::unordered_map<std::uint32_t, std::string> thunk_symbols_by_id;
+  if (options.enable_trampoline && options.enable_lift && !thunk_targets.empty()) {
+    for (const auto& target : thunk_targets) {
+      PeLiftPlan plan;
+      plan.symbol_id = detail::hmac_id_hex(metadata_key_context, target.symbol);
+      const auto located = find_symbol(parsed, target.symbol);
+      if (!located.has_value()) {
+        lift_plans.emplace(target.symbol, std::move(plan));
+        continue;
+      }
+
+      vmp::arch::common::CallingConvention cc{};
+      auto lifter = make_lifter(parsed, target, cc);
+      if (!lifter) {
+        lift_plans.emplace(target.symbol, std::move(plan));
+        continue;
+      }
+
+      const auto& [symbol, section] = *located;
+      const auto code_size = function_size(parsed, *symbol, *section);
+      const auto file_off = symbol_file_offset(*section, symbol->value);
+      if (code_size == 0 || file_off + code_size > parsed.bytes.size()) {
+        plan.diagnostics = detail::json::array({detail::json{{"offset", 0}, {"detail", "invalid function view"}}});
+        lift_plans.emplace(target.symbol, std::move(plan));
+        continue;
+      }
+
+      vmp::arch::common::FunctionView view;
+      const auto original_rva = static_cast<std::uint32_t>(symbol_rva(*symbol, *section));
+      view.base_addr = parsed.image_base + original_rva;
+      view.cc = cc;
+      view.endian = vmp::arch::common::ArchEndianness::little;
+      view.code.assign(parsed.bytes.begin() + static_cast<std::ptrdiff_t>(file_off),
+                       parsed.bytes.begin() + static_cast<std::ptrdiff_t>(file_off + code_size));
+
+      if (!lifter->can_lift(view)) {
+        plan.diagnostics = detail::json::array({detail::json{{"offset", 0}, {"detail", "incompatible function view"}}});
+        lift_plans.emplace(target.symbol, std::move(plan));
+        continue;
+      }
+
+      auto lifted = lifter->lift(view);
+      if (!lifted.ok()) {
+        plan.diagnostics = lift_diag_json(lifted.diagnostics);
+        lift_plans.emplace(target.symbol, std::move(plan));
+        continue;
+      }
+
+      const bool use_vm2 = target.vm2 && lifted.vm2_module.has_value();
+      plan.lifted = true;
+      plan.bundle_id = next_bundle_id;
+      plan.domain = use_vm2 ? 2u : 1u;
+      vmpcode_records.push_back(detail::VmpCodeRecord{
+          next_bundle_id,
+          plan.domain,
+          plan.symbol_id,
+          use_vm2 ? lifted.vm2_module->serialize() : lifted.module.serialize(),
+      });
+      lift_plans.emplace(target.symbol, plan);
+      ++next_bundle_id;
+    }
+  }
   const bool already_vmp_protected = looks_like_vmp_protected(parsed);
   std::set<std::string> used_section_names;
   for (const auto& section : parsed.sections) {
@@ -1001,6 +1097,9 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
     }
   }
   if (options.enable_trampoline && !thunk_targets.empty()) {
+    if (!vmpcode_records.empty()) {
+      section_names.vmpcode = detail::random_section_name(used_section_names);
+    }
     section_names.code_blob = detail::random_section_name(used_section_names);
     section_names.trampoline_meta = detail::random_section_name(used_section_names);
   }
@@ -1038,12 +1137,21 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
       if (!target.vm1 && !target.vm2) {
         continue;
       }
+      const auto plan_it = lift_plans.find(target.symbol);
+      const auto domain_name = [&]() {
+        if (plan_it != lift_plans.end() && plan_it->second.lifted) {
+          return plan_it->second.domain == 2 ? "vm2" : "vm1";
+        }
+        return target.vm2 ? "vm2" : "vm1";
+      }();
+      const bool use_vm2_bridge = domain_name == "vm2";
       thunk_meta["thunks"].push_back({
           {"id", detail::hmac_id_hex(metadata_key_context, target.symbol)},
-          {"domain", target.vm2 ? "vm2" : "vm1"},
+          {"domain", domain_name},
           {"bridge_id", detail::hmac_id_hex(metadata_key_context,
-              target.vm2 ? vmp::runtime::strings::obf::decode(VMP_OBFSTR("vmp_runtime_bridge_vm2"))
-                         : vmp::runtime::strings::obf::decode(VMP_OBFSTR("vmp_runtime_bridge_vm1")))}
+              use_vm2_bridge
+                  ? vmp::runtime::strings::obf::decode(VMP_OBFSTR("vmp_runtime_bridge_vm2"))
+                  : vmp::runtime::strings::obf::decode(VMP_OBFSTR("vmp_runtime_bridge_vm1")))}
       });
     }
     additions.push_back(SectionAddition{*section_names.thunk_meta,
@@ -1068,6 +1176,10 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
     additions.push_back(SectionAddition{*section_names.string_pool, artifacts.blob, 0x40000040u});
   }
 
+  if (!vmpcode_records.empty() && section_names.vmpcode.has_value()) {
+    additions.push_back(SectionAddition{*section_names.vmpcode, detail::serialize_vmpcode(vmpcode_records), 0x40000040u});
+  }
+
   if (options.enable_trampoline && !thunk_targets.empty()) {
     if (parsed.file_header.machine != 0x8664u) {
       throw std::runtime_error("rewriter: PE trampoline patching currently supports x86_64 only");
@@ -1076,7 +1188,7 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
       throw std::runtime_error("rewriter: internal PE section-name planning failure");
     }
 
-    const auto vmpcode_rva = next_section_virtual_address(parsed, additions);
+    const auto code_blob_rva = next_section_virtual_address(parsed, additions);
 
     std::vector<std::uint8_t> code_blob;
     std::vector<TrampolineRecord> records;
@@ -1098,7 +1210,7 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
       const auto body_offset = static_cast<std::uint32_t>(code_blob.size());
       const auto original_rva = static_cast<std::uint32_t>(symbol_rva(*symbol, *section));
       const auto original_va = parsed.image_base + original_rva;
-      const auto relocated_rva = vmpcode_rva + body_offset;
+      const auto relocated_rva = code_blob_rva + body_offset;
       const auto relocated_va = parsed.image_base + relocated_rva;
       std::vector<std::uint8_t> original_bytes(working_bytes.begin() + static_cast<std::ptrdiff_t>(file_off),
                                                working_bytes.begin() + static_cast<std::ptrdiff_t>(file_off + code_size));
@@ -1107,7 +1219,7 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
 
       append_padding(code_blob, 16);
       const auto bridge_offset = static_cast<std::uint32_t>(code_blob.size());
-      const auto bridge_rva = vmpcode_rva + bridge_offset;
+      const auto bridge_rva = code_blob_rva + bridge_offset;
       const auto bridge_va = parsed.image_base + bridge_rva;
       auto bridge = make_rel32_jump_stub(bridge_va, relocated_va);
       code_blob.insert(code_blob.end(), bridge.begin(), bridge.end());
@@ -1129,6 +1241,7 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
           static_cast<std::uint32_t>(code_size),
           token,
       });
+      thunk_symbols_by_id.emplace(detail::stable_string_id(target.symbol), target.symbol);
     }
 
     if (!code_blob.empty()) {
@@ -1139,14 +1252,27 @@ PeContainer apply(const PeContainer& input, const vmp::policy::PolicyIR& policy_
       meta["sections"] = section_map;
       meta["dispatcher_id"] = detail::hmac_id_hex(metadata_key_context, options.trampoline_dispatcher_symbol);
       for (const auto& record : records) {
-        meta["entries"].push_back({
+        const auto symbol_it = thunk_symbols_by_id.find(record.record_id);
+        const auto plan_it = symbol_it == thunk_symbols_by_id.end() ? lift_plans.end() : lift_plans.find(symbol_it->second);
+        detail::json entry{
             {"record_id", record.record_id},
             {"original_rva", record.original_rva},
             {"relocated_rva", record.relocated_rva},
             {"bridge_rva", record.bridge_rva},
             {"code_size", record.code_size},
             {"token", vmp::runtime::trampoline::token_hex(record.token)},
-        });
+        };
+        if (plan_it != lift_plans.end()) {
+          entry["lifted"] = plan_it->second.lifted;
+          if (plan_it->second.lifted) {
+            entry["bundle_id"] = plan_it->second.bundle_id;
+            entry["domain"] = plan_it->second.domain == 2 ? "vm2" : "vm1";
+            entry["symbol_id"] = plan_it->second.symbol_id;
+          } else if (!plan_it->second.diagnostics.empty()) {
+            entry["lift_diagnostics"] = plan_it->second.diagnostics;
+          }
+        }
+        meta["entries"].push_back(std::move(entry));
       }
       additions.push_back(SectionAddition{*section_names.trampoline_meta,
                                           detail::encrypt_metadata_json(metadata_key_context,

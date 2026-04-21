@@ -49,13 +49,6 @@ struct ParsedElf {
   std::vector<ParsedSymbol> symbols;
 };
 
-struct VmpCodeRecord {
-  std::uint64_t bundle_id = 0;
-  std::uint8_t domain = 1;  // 1 vm1, 2 vm2
-  std::string symbol;
-  std::vector<std::uint8_t> payload;
-};
-
 ParsedElf parse_bytes(const std::vector<std::uint8_t>& bytes) {
   ParsedElf out;
   out.bytes = bytes;
@@ -214,20 +207,6 @@ std::vector<std::uint8_t> rebuild_with_extra_sections(const ParsedElf& elf,
   return body;
 }
 
-std::vector<std::uint8_t> serialize_vmpcode(const std::vector<VmpCodeRecord>& records) {
-  std::vector<std::uint8_t> out{'V', 'M', 'P', 'C'};
-  detail::write_le(out, out.size(), records.size(), 4);
-  for (const auto& rec : records) {
-    detail::write_le(out, out.size(), rec.bundle_id, 8);
-    detail::write_le(out, out.size(), rec.domain, 1);
-    detail::write_le(out, out.size(), rec.symbol.size(), 4);
-    detail::write_le(out, out.size(), rec.payload.size(), 4);
-    out.insert(out.end(), rec.symbol.begin(), rec.symbol.end());
-    out.insert(out.end(), rec.payload.begin(), rec.payload.end());
-  }
-  return out;
-}
-
 std::vector<std::uint8_t> make_x64_sysv2_thunk(std::uint64_t helper_addr, std::uint64_t bundle_id, std::size_t total_size) {
   std::vector<std::uint8_t> stub = {
       0x48, 0x89, 0xF2,              // mov rdx, rsi
@@ -347,7 +326,7 @@ ElfContainer apply(const ElfContainer& input, const vmp::policy::PolicyIR& polic
   json thunk_meta;
   thunk_meta["container"] = "elf";
   thunk_meta["thunks"] = json::array();
-  std::vector<VmpCodeRecord> vmpcode_records;
+  std::vector<detail::VmpCodeRecord> vmpcode_records;
   vmp::runtime::trampoline::TrampolineBundle trampoline_bundle;
   const auto trampoline_arch = trampoline_arch_for_machine(parsed.ehdr.e_machine);
   if (options.enable_trampoline) {
@@ -426,9 +405,9 @@ ElfContainer apply(const ElfContainer& input, const vmp::policy::PolicyIR& polic
                 thunk_entry["mode"] = "lifted";
                 thunk_entry["bundle_id"] = next_bundle_id;
                 if (target.vm2 && lifted.vm2_module.has_value()) {
-                  vmpcode_records.push_back(VmpCodeRecord{next_bundle_id, 2, target.symbol, lifted.vm2_module->serialize()});
+                  vmpcode_records.push_back(detail::VmpCodeRecord{next_bundle_id, 2, target.symbol, lifted.vm2_module->serialize()});
                 } else {
-                  vmpcode_records.push_back(VmpCodeRecord{next_bundle_id, 1, target.symbol, lifted.module.serialize()});
+                  vmpcode_records.push_back(detail::VmpCodeRecord{next_bundle_id, 1, target.symbol, lifted.module.serialize()});
                 }
                 if (parsed.ehdr.e_machine == EM_X86_64 && !target.vm2 && vm1_helper_addr != 0 && sym.sym.st_size >= 28) {
                   const auto stub = make_x64_sysv2_thunk(vm1_helper_addr, next_bundle_id, static_cast<std::size_t>(sym.sym.st_size));
@@ -477,7 +456,7 @@ ElfContainer apply(const ElfContainer& input, const vmp::policy::PolicyIR& polic
     extra_sections.push_back({".vmpstrings", artifacts.blob});
   }
   if (!vmpcode_records.empty()) {
-    extra_sections.push_back({".vmpcode", serialize_vmpcode(vmpcode_records)});
+    extra_sections.push_back({".vmpcode", detail::serialize_vmpcode(vmpcode_records)});
   }
   if (!trampoline_bundle.records.empty()) {
     extra_sections.push_back({".vmptrmp", trampoline_bundle.serialize()});

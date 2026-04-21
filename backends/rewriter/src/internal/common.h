@@ -165,6 +165,13 @@ struct StringPoolArtifacts {
   json kdf_json;
 };
 
+struct VmpCodeRecord {
+  std::uint64_t bundle_id = 0;
+  std::uint8_t domain = 1;  // 1 vm1, 2 vm2
+  std::string symbol;
+  std::vector<std::uint8_t> payload;
+};
+
 inline StringPoolArtifacts build_string_pool(const std::vector<StringRecordRequest>& requests) {
   auto master = resolve_master_key();
   auto salt = random_bytes(32);
@@ -217,6 +224,20 @@ inline std::vector<BinaryPolicyTarget> binary_targets(const vmp::policy::PolicyI
       continue;
     }
     out.push_back(decode_target(entry));
+  }
+  return out;
+}
+
+inline std::vector<std::uint8_t> serialize_vmpcode(const std::vector<VmpCodeRecord>& records) {
+  std::vector<std::uint8_t> out{'V', 'M', 'P', 'C'};
+  write_le(out, out.size(), records.size(), 4);
+  for (const auto& rec : records) {
+    write_le(out, out.size(), rec.bundle_id, 8);
+    write_le(out, out.size(), rec.domain, 1);
+    write_le(out, out.size(), rec.symbol.size(), 4);
+    write_le(out, out.size(), rec.payload.size(), 4);
+    out.insert(out.end(), rec.symbol.begin(), rec.symbol.end());
+    out.insert(out.end(), rec.payload.begin(), rec.payload.end());
   }
   return out;
 }

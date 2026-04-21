@@ -45,6 +45,7 @@ struct MetadataSectionNames {
   std::optional<std::string> vmload;
   std::optional<std::string> thunk_meta;
   std::optional<std::string> string_pool;
+  std::optional<std::string> vmpcode;
   std::optional<std::string> code_blob;
   std::optional<std::string> trampoline_meta;
 
@@ -53,6 +54,7 @@ struct MetadataSectionNames {
     if (vmload.has_value()) out["vmload"] = *vmload;
     if (thunk_meta.has_value()) out["thunk_meta"] = *thunk_meta;
     if (string_pool.has_value()) out["string_pool"] = *string_pool;
+    if (vmpcode.has_value()) out["vmpcode"] = *vmpcode;
     if (code_blob.has_value()) out["code_blob"] = *code_blob;
     if (trampoline_meta.has_value()) out["trampoline_meta"] = *trampoline_meta;
     return out;

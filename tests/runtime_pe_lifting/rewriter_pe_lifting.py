@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 import json
-import math
 import pathlib
 import re
 import shutil
 import struct
 import subprocess
 import sys
-from collections import Counter
 
 
 def fail(msg: str) -> None:
@@ -24,7 +22,7 @@ def sh(cmd: list[str | pathlib.Path], *, check: bool = True) -> subprocess.Compl
     return res
 
 
-def parse_pe(path: pathlib.Path):
+def parse_pe(path: pathlib.Path) -> dict:
     data = path.read_bytes()
     if data[:2] != b'MZ':
         fail('not mz')
@@ -80,23 +78,44 @@ def section_bytes(pe: dict, section: dict) -> bytes:
     return pe['data'][start:end]
 
 
-def entropy(blob: bytes) -> float:
-    if not blob:
-        return 0.0
-    counts = Counter(blob)
-    total = len(blob)
-    return -sum((count / total) * math.log2(count / total) for count in counts.values())
+def parse_vmpcode_section(blob: bytes) -> list[dict[str, object]]:
+    if blob[:4] != b'VMPC':
+        fail('bad vmpcode magic')
+    offset = 4
+    count = struct.unpack_from('<I', blob, offset)[0]
+    offset += 4
+    records = []
+    for _ in range(count):
+        bundle_id = struct.unpack_from('<Q', blob, offset)[0]
+        offset += 8
+        domain = blob[offset]
+        offset += 1
+        symbol_len = struct.unpack_from('<I', blob, offset)[0]
+        offset += 4
+        payload_len = struct.unpack_from('<I', blob, offset)[0]
+        offset += 4
+        symbol = blob[offset:offset + symbol_len].decode(errors='replace')
+        offset += symbol_len
+        payload = blob[offset:offset + payload_len]
+        offset += payload_len
+        records.append({
+            'bundle_id': bundle_id,
+            'domain': domain,
+            'symbol': symbol,
+            'payload': payload,
+        })
+    return records
 
 
 def main() -> None:
     if len(sys.argv) != 4:
-        raise SystemExit('usage: metadata_encrypt_pe.py <vmp-protect> <vmp-trampoline-inject> <binary-dir>')
+        raise SystemExit('usage: rewriter_pe_lifting.py <vmp-protect> <vmp-trampoline-inject> <binary-dir>')
 
     protect_tool = pathlib.Path(sys.argv[1])
     trampoline_tool = pathlib.Path(sys.argv[2])
     binary_dir = pathlib.Path(sys.argv[3])
     source_root = pathlib.Path(__file__).resolve().parents[2]
-    work = binary_dir / 'tests' / 'runtime_metadata_encrypt'
+    work = binary_dir / 'tests' / 'rewriter_pe_lifting'
     if work.exists():
         shutil.rmtree(work)
     work.mkdir(parents=True)
@@ -111,7 +130,7 @@ def main() -> None:
     baseline = work / 'target_c.exe'
     stage1 = work / 'target_c.stage1.exe'
     protected = work / 'target_c.protected.exe'
-    sh([compiler, str(src), '-I', str(include_dir), '-O2', '-o', baseline])
+    sh([compiler, str(src), '-I', str(include_dir), '-O2', '-o', str(baseline)])
 
     policy = work / 'policy.json'
     policy.write_text(json.dumps({
@@ -130,81 +149,50 @@ def main() -> None:
             'mobile_bridge_mode': 'off',
             'event_types': [],
         },
-        'entries': [
-            {
-                'symbol_or_region': 'protected_mix_c',
-                'language_origin': 'binary',
-                'annotation_origin': 'external_manifest',
-                'annotation_tags': ['vm_func'],
-                'protection_domain': 'vm1',
-                'jit_policy': 'off',
-                'plaintext_budget': 'transient_only',
-                'reaction_policy': 'log',
-                'integrity_level': 'basic',
-                'platform_caps': ['windows', 'x64'],
-                'sensitivity_level': 'normal',
-                'profile_seed': 1,
-                'mobile_bridge_mode': 'off',
-                'event_types': [],
-            },
-            {
-                'symbol_or_region': 'kProtectedCString',
-                'language_origin': 'binary',
-                'annotation_origin': 'external_manifest',
-                'annotation_tags': ['vm_string'],
-                'protection_domain': 'native',
-                'jit_policy': 'off',
-                'plaintext_budget': 'transient_only',
-                'reaction_policy': 'log',
-                'integrity_level': 'basic',
-                'platform_caps': ['windows', 'x64'],
-                'sensitivity_level': 'highly_sensitive',
-                'profile_seed': 1,
-                'mobile_bridge_mode': 'off',
-                'event_types': [],
-            },
-        ],
+        'entries': [{
+            'symbol_or_region': 'protected_mix_c',
+            'language_origin': 'binary',
+            'annotation_origin': 'external_manifest',
+            'annotation_tags': ['vm_func'],
+            'protection_domain': 'vm1',
+            'jit_policy': 'off',
+            'plaintext_budget': 'transient_only',
+            'reaction_policy': 'log',
+            'integrity_level': 'basic',
+            'platform_caps': ['windows', 'x64'],
+            'sensitivity_level': 'normal',
+            'profile_seed': 1,
+            'mobile_bridge_mode': 'off',
+            'event_types': [],
+        }],
     }, indent=2))
 
     sh([protect_tool, '--policy', policy, '--input', baseline, '--output', stage1])
-    sh([trampoline_tool, '--policy', policy, '--input', stage1, '--output', protected, '--key-context-id', '00112233445566778899aabbccddeeff'])
+    sh([trampoline_tool, '--policy', policy, '--input', stage1, '--output', protected])
 
-    strings_out = sh(['strings', '-a', protected]).stdout
-    vmp_hits = [
-        line for line in strings_out.splitlines()
-        if re.search(r'vmp', line, re.IGNORECASE) and not line.startswith('VMPC')
-    ]
-    if vmp_hits:
-        fail(f'protected binary still leaks vmp markers via strings -a: {vmp_hits[:10]}')
-
-    objdump_h = sh(['objdump', '-h', protected]).stdout
-    fixed_names = ['.vmpload', '.vmpvm', '.vmptrmp', '.vmpcode', '.vmpstrings']
-    leaked_fixed = [name for name in fixed_names if name in objdump_h]
-    if leaked_fixed:
-        fail(f'objdump -h still shows fixed VMP section names: {leaked_fixed}')
-
+    stage1_pe = parse_pe(stage1)
     protected_pe = parse_pe(protected)
-    baseline_pe = parse_pe(baseline)
-    baseline_names = {section['name'] for section in baseline_pe['sections']}
-    random_sections = [
-        section for section in protected_pe['sections']
-        if section['name'] not in baseline_names and re.fullmatch(r'\.[a-z0-9]{7}', section['name'])
+    stage1_names = {sec['name'] for sec in stage1_pe['sections']}
+    new_randomized = [
+        sec for sec in protected_pe['sections']
+        if sec['name'] not in stage1_names and re.fullmatch(r'\.[a-z0-9]{7}', sec['name'])
     ]
-    if len(random_sections) < 4:
-        fail(f'expected >=4 randomized section names, got {[section["name"] for section in random_sections]}')
+    vmpcode_sections = [sec for sec in new_randomized if section_bytes(protected_pe, sec).startswith(b'VMPC')]
+    if not vmpcode_sections:
+        fail(f'missing serialized VMPC section in new randomized sections: {[sec["name"] for sec in new_randomized]}')
 
-    data_sections = [section for section in random_sections if (section['characteristics'] & 0x20000000) == 0]
-    if not data_sections:
-        fail('no randomized non-executable data sections found')
-    max_entropy = max(entropy(section_bytes(protected_pe, section)) for section in data_sections)
-    if max_entropy <= 7.5:
-        fail(f'max randomized data-section entropy too low: {max_entropy:.4f}')
+    records = parse_vmpcode_section(section_bytes(protected_pe, vmpcode_sections[0]))
+    if len(records) != 1:
+        fail(f'expected exactly one VMPC record, got {records}')
+    match = records[0]
+    if match['domain'] != 1:
+        fail(f'expected vm1 domain=1, got {match["domain"]}')
+    if not re.fullmatch(r'[0-9a-f]{16}', str(match['symbol'])):
+        fail(f'expected HMAC symbol id, got {match["symbol"]!r}')
+    if not bytes(match['payload']).startswith(b'VM1B'):
+        fail(f'expected VM1 payload magic, got {bytes(match["payload"])[:4]!r}')
 
-    import_dump = sh(['objdump', '-p', protected]).stdout
-    if re.search(r'\bVirtualProtect\b|\bVirtualQuery\b', import_dump):
-        fail('import table still contains VirtualProtect/VirtualQuery')
-
-    print('runtime_metadata_encrypt_pe OK')
+    print('rewriter_pe_lifting OK')
 
 
 if __name__ == '__main__':
