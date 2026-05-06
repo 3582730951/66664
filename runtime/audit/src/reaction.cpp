@@ -20,7 +20,13 @@ std::chrono::milliseconds default_delay() noexcept {
   return std::chrono::milliseconds(500);
 }
 
-void default_exit() noexcept { std::quick_exit(0); }
+void default_exit() noexcept {
+#if defined(_WIN32)
+  std::exit(0);
+#else
+  std::quick_exit(0);
+#endif
+}
 
 void default_scheduler(std::chrono::milliseconds delay, std::function<void()> hook) noexcept {
   try {

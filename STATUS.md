@@ -4837,3 +4837,23 @@
   - 需要推送第二个 commit 并等待新的 `windows-live-evidence` run 完成。
 - 下一子任务建议：
   - 提交并推送补齐的 CMake/test 文件，继续观察第二轮 GitHub Actions；若进入 build/test 后失败，继续按日志修复。
+
+## windows_ci_live_evidence_github_run2_20260506
+- 本轮清单：
+  - 推送 commit `66b12c3` 后触发第二轮 `windows-live-evidence`，run ID `25430769522`。
+  - 第二轮 configure 已通过，失败推进到 `Build Windows host tools`，说明第一轮缺 CMake 文件的问题已解除。
+  - 拉取 build 日志确认新的真实失败点：MinGW 编译 `runtime/audit/src/reaction.cpp` 时 `std::quick_exit` 不可用。
+  - 修复 Windows/MinGW 路径：`default_exit()` 在 `_WIN32` 下使用 `std::exit(0)`，非 Windows 路径保持 `std::quick_exit(0)`。
+- 变更文件：
+  - `/workspace/vmp/runtime/audit/src/reaction.cpp`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - GitHub run `25430769522`：`completed/failure`，失败点为 MinGW build，不是 evidence collector 失败。
+  - 本地 Linux 工具构建探针：
+    - `cmake --build /tmp/vmp_config_probe --target vmp-protect vmp-trampoline-inject vmp-cpp-fallback-scan -j2`：通过。
+  - 该本地探针不能替代 Windows/MinGW 编译；需要第三轮 GitHub run 验证 `_WIN32` fallback。
+- 未完成项：
+  - 尚未获得 Windows evidence artifact。
+  - 需要提交并推送第三个 commit，观察是否进入 integration/evidence collector。
+- 下一子任务建议：
+  - 推送 `reaction.cpp` fallback 修复；若第三轮进入 protected PE 执行或证据采集失败，继续拉取日志按真实错误修。
