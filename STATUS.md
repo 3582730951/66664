@@ -5015,3 +5015,59 @@
   - 第八轮成功后重新进行 5 agent × 3 round 审核；第六轮审核结果因 agent 5 FAIL 不能作为最终验收。
 - 下一子任务建议：
   - 若第八轮多样本仍无法让全部 agent 达到 ≥80%，下一优先级是补真实 debugger detector audit event 或硬件断点 Windows 覆盖；Frida 因 GitHub runner attach 时序不稳定，作为次优项处理。
+
+## windows_ci_live_evidence_github_run8_multisample_20260506
+- 本轮清单：
+  - 推送 commit `4ca8abe` 后触发第八轮 `windows-live-evidence`，run ID `25434463384`。
+  - 第八轮 CI 完成且结论为 `success`，artifact `windows-live-evidence-25434463384` 已生成，artifact ID `6829947585`。
+  - 下载 artifact 到 `/tmp/windows-live-evidence-25434463384` 后确认包含两个 external-live report：
+    - `external_live_matrix_windows_target_c_25434463384.json`
+    - `external_live_matrix_windows_target_cpp_25434463384.json`
+  - 使用 artifact 解压目录作为 bundle root 校验两个 report：通过。
+  - 逐项重算 target binary 与 evidence artifacts 的 sha256：两个样本、native/debug stdout/stderr/audit/meta 全部存在且匹配。
+  - `target_c` 与 `target_cpp` 在 Windows native execution 与 Windows Debug API launch 下均 `ok=true` 且输出匹配 deterministic oracle。
+  - Frida attach 仍被诚实记录为 skipped；不计入 detector coverage。
+- 变更文件：
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - GitHub run `25434463384`：`completed/success`。
+  - `python3 paper/scripts/validate_external_live.py --bundle-root /tmp/windows-live-evidence-25434463384 /tmp/windows-live-evidence-25434463384/external_live_matrix_windows_target_c_25434463384.json /tmp/windows-live-evidence-25434463384/external_live_matrix_windows_target_cpp_25434463384.json`：通过。
+  - `performance_20260506.md`：
+    - `x86_64-windows/target_c` baseline/protected 均正确，overhead ratio `1.0106`。
+    - `x86_64-windows/target_cpp` baseline/protected 均正确，overhead ratio `1.0556`。
+  - `target_c` observed result：`target_c fib40=102334155 checksum=9080872688760629372 secret_len=27`。
+  - `target_cpp` observed result：`target_cpp fib40=102334155 checksum=3129005616731149303 secret_len=29`。
+- 未完成项：
+  - 需要重新进行 5 agent × 3 round 审核；只有 15 轮全部 ≥80 且结论一致，才能按当前验收标准收口。
+  - 仍不能声称 Frida detector、debugger detector audit event、hardware breakpoint 或 Windows Rust 覆盖。
+- 下一子任务建议：
+  - 启动第二轮 multi-agent 审核；若仍有 agent 低于 80，按其扣分项继续补真实证据。
+
+## windows_ci_live_evidence_multiagent_round2_pass_20260506
+- 本轮清单：
+  - 基于第八轮 multi-sample artifact 重新启动 5 个审核 agent，每个 agent 按同一 100 分 rubric 独立审核 3 轮。
+  - Rubric：Evidence authenticity 25、Scope honesty 20、Reproducibility 20、CI correctness 15、Residual risk 20；每轮 `>=80` 才 PASS。
+  - 15 轮审核全部 PASS，最低分 `82`，5 个 agent 结论一致：第八轮 Windows CI multi-sample evidence 可作为论文/评审补充证据。
+  - 通过范围严格限定为：Windows GitHub CI 上 `target_c` 与 `target_cpp` 的 native correctness，以及 Windows Debug API launch survival。
+  - 所有 agent 均明确不可扩大为：Frida detector 覆盖、debugger detector audit event、hardware breakpoint 覆盖、Windows Rust 覆盖。
+- 变更文件：
+  - `/workspace/vmp/STATUS.md`
+- 审核结果：
+  - Agent A：`87/85/86`，PASS，估计通过概率约 `86%`。
+  - Agent B：`85/84/84`，PASS，估计通过概率约 `84%-85%`。
+  - Agent C：`84/82/83`，PASS，估计通过概率约 `83%`。
+  - Agent D：`85/84/84`，PASS，估计通过概率约 `84%`。
+  - Agent E：`87/86/86`，PASS，估计通过概率约 `86%`。
+  - 汇总：15/15 PASS，最低分 `82`，通过概率区间 `83%-86%`，满足“不低于 80%”验收标准。
+- 真实依据：
+  - GitHub run `25434463384`：`completed/success`。
+  - Artifact `6829947585`：`windows-live-evidence-25434463384`，本地解压目录 `/tmp/windows-live-evidence-25434463384`。
+  - `python3 paper/scripts/validate_external_live.py --bundle-root /tmp/windows-live-evidence-25434463384 /tmp/windows-live-evidence-25434463384/external_live_matrix_windows_target_c_25434463384.json /tmp/windows-live-evidence-25434463384/external_live_matrix_windows_target_cpp_25434463384.json`：通过。
+  - 两个 target binary 与所有 stdout/stderr/audit/meta evidence artifact 均可直接相对 bundle root 命中，sha256 全部匹配。
+  - `target_c` 和 `target_cpp` 的 Windows native/debugapi 均 `ok=true`，输出匹配 deterministic oracle。
+  - `performance_20260506.md` 显示两个样本 baseline/protected 均正确：`target_c` overhead `1.0106`，`target_cpp` overhead `1.0556`。
+- 未完成项：
+  - 不能声称 90% 通过概率；所有 agent 的真实估计均低于 90%。
+  - Frida 仍为 skipped；audit logs 为空且 `audit_events=[]`；无 hardware breakpoint evidence；Windows Rust PE 符号问题未修复。
+- 下一子任务建议：
+  - 若目标提升到 90%，优先补真实 debugger detector audit event、硬件断点 Windows evidence、Windows Rust PE 修复与多 Windows 环境；不能用当前证据虚报 90%。
