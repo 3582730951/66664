@@ -4790,3 +4790,50 @@
   - Frida check 是 optional；若 GitHub runner 上 frida 安装或 attach 失败，会被诚实记录为 skipped。
 - 下一子任务建议：
   - 在 GitHub 上手动触发 `windows-live-evidence` workflow，下载 artifact 后用 `paper/scripts/validate_external_live.py` 和五代理 rubric 复审；若 Debug API 或 Frida 未触发 detector event，再补 Windows runtime detector 集成或单独 cdb/WinDbg evidence job。
+
+## windows_ci_live_evidence_github_run1_20260506
+- 本轮清单：
+  - 将测试仓库远程设为 `https://github.com/3582730951/66664.git`，并推送 commit `251f8ee` 到 `main` 触发 GitHub Actions。
+  - GitHub 启动 7 个 workflow；关键 run `windows-live-evidence` ID 为 `25430461836`。
+  - 第一轮 run 在 `Configure Windows host tools` 失败，尚未进入 Windows evidence collector。
+  - 拉取 job 日志确认失败原因：远程测试仓库缺少已被顶层 CMake 引用的多个 `CMakeLists.txt` 和少量新增测试源文件，导致 `runtime/cryptor`、`runtime/trusted_oracle`、`tests/runtime_reverse_layout` 等目录无法 `add_subdirectory`。
+  - 按真实失败原因补齐构建清单和被 CMake 引用源文件，准备第二次 push。
+- 变更文件：
+  - `/workspace/vmp/runtime/cryptor/CMakeLists.txt`
+  - `/workspace/vmp/runtime/cryptor/README.md`
+  - `/workspace/vmp/runtime/env_detectors/CMakeLists.txt`
+  - `/workspace/vmp/runtime/env_detectors/README.md`
+  - `/workspace/vmp/runtime/env_integrity/CMakeLists.txt`
+  - `/workspace/vmp/runtime/obfuscation/CMakeLists.txt`
+  - `/workspace/vmp/runtime/stack_probe/CMakeLists.txt`
+  - `/workspace/vmp/runtime/stack_probe/README.md`
+  - `/workspace/vmp/runtime/trampoline/CMakeLists.txt`
+  - `/workspace/vmp/runtime/trampoline/README.md`
+  - `/workspace/vmp/runtime/trusted_oracle/CMakeLists.txt`
+  - `/workspace/vmp/runtime/trusted_oracle/README.md`
+  - `/workspace/vmp/runtime/trusted_oracle/include/vmp/runtime/trusted_oracle/voting.h`
+  - `/workspace/vmp/tests/runtime_crypto_revision/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_dispatcher_hardening/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_dispatcher_hardening/dispatcher_batch_hmac_epoch_cache.cpp`
+  - `/workspace/vmp/tests/runtime_env_detectors/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_env_integrity/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_reverse_layout/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_rolling_opcode/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_rolling_opcode/rolling_opcode_lazy_page_materialization.cpp`
+  - `/workspace/vmp/tests/runtime_stack_probe/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_stack_probe/stack_probe_selector_low16_and_maps_cache.cpp`
+  - `/workspace/vmp/tests/runtime_trampoline/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_trusted_oracle/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_trusted_oracle/trusted_oracle_ablation_matrix.cpp`
+  - `/workspace/vmp/tests/runtime_trusted_oracle/trusted_oracle_single_source_ablation.cpp`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - GitHub run `25430461836`：`completed/failure`，失败点为 configure；这不是证据失败，而是测试仓库缺构建文件。
+  - 本地安装 `cmake/ninja-build/build-essential` 后运行：
+    - `cmake -S . -B /tmp/vmp_config_probe -G Ninja -DCMAKE_BUILD_TYPE=Release -DVMP_PLATFORM=windows -DVMP_ARCH=x64`：配置通过。
+  - staged 文件 secret scan：未发现 PAT、embedded credential URL 或认证头字符串。
+- 未完成项：
+  - 还没有成功的 Windows evidence artifact。
+  - 需要推送第二个 commit 并等待新的 `windows-live-evidence` run 完成。
+- 下一子任务建议：
+  - 提交并推送补齐的 CMake/test 文件，继续观察第二轮 GitHub Actions；若进入 build/test 后失败，继续按日志修复。

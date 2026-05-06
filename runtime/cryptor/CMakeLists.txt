@@ -1,0 +1,4 @@
+add_library(vmp_runtime_cryptor STATIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rolling_opcode.cpp)
+target_link_libraries(vmp_runtime_cryptor PUBLIC vmp_build_options vmp_runtime_audit vmp_runtime_strings)
+target_include_directories(vmp_runtime_cryptor PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
