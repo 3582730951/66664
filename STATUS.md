@@ -4913,3 +4913,32 @@
   - Windows Rust PE 符号查找问题另行登记，不能作为本轮 Windows target_c live evidence 的阻塞项。
 - 下一子任务建议：
   - 推送后拉取第五轮 run 日志和 artifact；若 artifact 校验通过，再把 Windows live evidence 纳入五代理三轮审核依据。
+
+## windows_ci_live_evidence_github_run5_20260506
+- 本轮清单：
+  - 推送 commit `00a6772` 后触发第五轮 `windows-live-evidence`，run ID `25432552585`。
+  - 第五轮 CI 完成且结论为 `success`，真实 artifact `windows-live-evidence-25432552585` 已生成。
+  - 下载 artifact 后本地复核 `external_live_matrix_windows_25432552585.json`：Windows native execution 与 Windows Debug API launch 均 `ok=true`，输出均匹配 deterministic oracle。
+  - 性能报告显示 `x86_64-windows/target_c` baseline/protected 均正确，protected overhead ratio 为 `1.0866`。
+  - Frida attach 被诚实记录为 skipped，原因是 attach 未能在进程退出前成功；未把它计为 detector coverage。
+  - 发现证据完整性可提升点：JSON 中声明了 audit-log artifact 路径，但 audit log 文件在无事件时未实际上传，且该 artifact 未带 sha256。
+  - 加固 collector/validator/schema：所有声明的 evidence artifact 必须实际存在并带 sha256；无 audit 事件时生成真实空 audit log 文件，避免 JSON 指向不存在文件。
+- 变更文件：
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/paper/scripts/validate_external_live.py`
+  - `/workspace/vmp/paper/schemas/external_live_matrix.schema.json`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - GitHub run `25432552585`：`completed/success`。
+  - 下载 artifact `6829129654` 到 `/tmp/windows-live-evidence-25432552585`：成功。
+  - `python3 paper/scripts/validate_external_live.py /tmp/windows-live-evidence-25432552585/external_live_matrix_windows_25432552585.json`：通过。
+  - Artifact 内容包含 `external_live_matrix_windows_25432552585.json`、`performance_20260506.json/md`、Windows native/debug stdout/stderr/meta 日志。
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py tests/integration_targets/run_integration_ci.py`：通过。
+  - `python3 tests/live_tool_campaign/run_windows_ci_live.py --help`：通过。
+  - 使用带 sha256 的 synthetic external-live report 验证新版 `validate_external_live.py`：通过。
+  - `git diff --check -- tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py paper/schemas/external_live_matrix.schema.json STATUS.md`：通过。
+- 未完成项：
+  - 需要提交并推送 artifact sha 强制化修复，跑第六轮 CI，确认 artifact 内 audit log 文件与 sha256 完整存在。
+  - 目前 Windows 证据可支持 platform correctness 与 Debug API launch survival；仍不能声称 Frida detector coverage 或 hardware-breakpoint detector coverage。
+- 下一子任务建议：
+  - 第六轮 CI 成功后下载 artifact，验证每个 `evidence_artifacts` 路径均在 zip 内存在且 sha256 匹配，再进入五代理三轮审核。

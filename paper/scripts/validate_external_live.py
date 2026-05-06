@@ -114,8 +114,8 @@ def validate_evidence_artifacts(check: dict[str, Any], ctx: str) -> None:
         path = require_string(artifact, "path", actx, 1)
         require(not Path(path).is_absolute(), f"{actx}.path: use a relative or redacted path")
         require_string(artifact, "kind", actx, 2)
-        if "sha256" in artifact:
-            require(isinstance(artifact["sha256"], str) and SHA256_RE.match(artifact["sha256"]), f"{actx}.sha256: expected 64 hex characters")
+        require("sha256" in artifact, f"{actx}.sha256: required for traceable evidence artifacts")
+        require(isinstance(artifact["sha256"], str) and SHA256_RE.match(artifact["sha256"]), f"{actx}.sha256: expected 64 hex characters")
 
 
 def validate_check(check: Any, idx: int, target_expected: Any) -> bool:

@@ -80,10 +80,16 @@ def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", errors="replace")
 
 
+def ensure_text_file(path: Path) -> None:
+    if not path.exists():
+        write_text(path, "")
+
+
 def evidence_artifact(path: Path, kind: str) -> dict[str, str]:
+    if not path.exists():
+        raise FileNotFoundError(f"missing evidence artifact: {rel(path)}")
     item = {"path": rel(path), "kind": kind}
-    if path.exists():
-        item["sha256"] = sha256_file(path)
+    item["sha256"] = sha256_file(path)
     return item
 
 
@@ -187,6 +193,7 @@ def collect_native_check(binary: Path, iterations: int, expected: str, raw_dir: 
     stderr_log = raw_dir / "windows_native_stderr.log"
     write_text(stdout_log, result["stdout"])
     write_text(stderr_log, result["stderr"])
+    ensure_text_file(audit_path)
     ok = result["exit_code"] == 0 and result["observed"] == expected
     return make_check(
         check_id="windows_native_execution",
@@ -365,8 +372,9 @@ def collect_debugger_check(binary: Path, iterations: int, expected: str, raw_dir
     ok = result["exit_code"] == 0 and result["debug_events"] > 0 and observed == expected
     meta_log = raw_dir / "windows_debugapi_meta.json"
     write_text(meta_log, json.dumps(result, indent=2, sort_keys=True) + "\n")
-    if not stderr_log.exists():
-        write_text(stderr_log, stderr_text)
+    ensure_text_file(stdout_log)
+    ensure_text_file(stderr_log)
+    ensure_text_file(audit_path)
     return make_check(
         check_id="windows_debugapi_launch",
         alias="Windows-DebugAPI",
@@ -445,6 +453,7 @@ def collect_frida_check(binary: Path, iterations: int, expected: str, raw_dir: P
 
     write_text(stdout_log, stdout_text)
     write_text(stderr_log, stderr_text)
+    ensure_text_file(audit_path)
     audit_text = audit_path.read_text(encoding="utf-8", errors="ignore") if audit_path.exists() else ""
     observed = stdout_text.strip().replace("\r\n", "\n").replace("\r", "")
     ok = attached and script_loaded and proc.returncode == 0 and observed == expected
