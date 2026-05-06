@@ -895,8 +895,9 @@ int DirectSyscall::open_readonly(const char* path) noexcept {
   }
   return static_cast<int>(normalize_linux_ret(raw(sysnr::kOpen, reinterpret_cast<std::uintptr_t>(path), flags, 0, 0, 0, 0)));
 #else
-  const int fd = ::open(path, O_RDONLY);
-  return fd;
+  (void)path;
+  errno = ENOSYS;
+  return -1;
 #endif
 }
 
@@ -910,6 +911,10 @@ std::ptrdiff_t DirectSyscall::read(int fd, void* buffer, std::size_t count) noex
                                                              0,
                                                              0)));
 #else
+  (void)fd;
+  (void)buffer;
+  (void)count;
+  errno = ENOSYS;
   return -1;
 #endif
 }
@@ -918,6 +923,8 @@ int DirectSyscall::close(int fd) noexcept {
 #if defined(__linux__) || defined(__ANDROID__) || defined(__APPLE__)
   return static_cast<int>(normalize_linux_ret(raw(sysnr::kClose, static_cast<std::uintptr_t>(fd), 0, 0, 0, 0, 0)));
 #else
+  (void)fd;
+  errno = ENOSYS;
   return -1;
 #endif
 }

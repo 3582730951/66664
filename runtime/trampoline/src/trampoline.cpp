@@ -20,6 +20,10 @@
 #define VMP_TRAMPOLINE_ALLOCA _alloca
 #define VMP_TRAMPOLINE_NOINLINE __declspec(noinline)
 #include <intrin.h>
+#elif defined(_WIN32)
+#include <malloc.h>
+#define VMP_TRAMPOLINE_ALLOCA _alloca
+#define VMP_TRAMPOLINE_NOINLINE __attribute__((noinline))
 #else
 #include <alloca.h>
 #define VMP_TRAMPOLINE_ALLOCA alloca

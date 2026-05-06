@@ -27,6 +27,14 @@ enum : std::uint32_t {
   SHT_INIT_ARRAY = 14,
 };
 
+enum : unsigned char {
+  STB_GLOBAL = 1,
+};
+
+constexpr unsigned char ELF64_ST_BIND(unsigned char info) noexcept {
+  return static_cast<unsigned char>(info >> 4);
+}
+
 using Elf64_Addr = std::uint64_t;
 using Elf64_Off = std::uint64_t;
 using Elf64_Half = std::uint16_t;

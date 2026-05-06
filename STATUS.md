@@ -4857,3 +4857,36 @@
   - 需要提交并推送第三个 commit，观察是否进入 integration/evidence collector。
 - 下一子任务建议：
   - 推送 `reaction.cpp` fallback 修复；若第三轮进入 protected PE 执行或证据采集失败，继续拉取日志按真实错误修。
+
+## windows_ci_live_evidence_github_run3_20260506
+- 本轮清单：
+  - 推送 commit `0327eac` 后触发第三轮 `windows-live-evidence`，run ID `25431137556`。
+  - 第三轮仍失败在 `Build Windows host tools`，但已越过 `std::quick_exit` 问题。
+  - 拉取 build 日志确认新的 Windows/MinGW 编译问题：
+    - `runtime/integrity/src/periodic_sweeper.cpp` 缺 `<stdexcept>`。
+    - `runtime/trusted_oracle/src/syscall_windows_x64.cpp` 需要用 `reinterpret_cast` 读取 `GetProcAddress` 返回的 `FARPROC` 字节。
+    - `runtime/trusted_oracle/src/oracle.cpp` 的非 Linux `open/read/close` fallback 不能在 Windows 下调用未声明 POSIX API。
+    - `runtime/trampoline/src/trampoline.cpp` 在 Windows/MinGW 下不能包含 `<alloca.h>`，应走 `<malloc.h>`/`_alloca`。
+    - `backends/rewriter/src/internal/elf_types.h` Windows fallback ELF header 缺 `STB_GLOBAL` 和 `ELF64_ST_BIND`。
+  - 安装本地 MinGW 交叉编译工具链，并切到 x86_64 posix variant 以匹配 MSYS2 MinGW 的线程模型。
+  - 完成上述兼容修复。
+- 变更文件：
+  - `/workspace/vmp/runtime/integrity/src/periodic_sweeper.cpp`
+  - `/workspace/vmp/runtime/trusted_oracle/src/syscall_windows_x64.cpp`
+  - `/workspace/vmp/runtime/trusted_oracle/src/oracle.cpp`
+  - `/workspace/vmp/runtime/trampoline/src/trampoline.cpp`
+  - `/workspace/vmp/backends/rewriter/src/internal/elf_types.h`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - GitHub run `25431137556`：`completed/failure`，失败点为 MinGW build。
+  - 本地安装：`apt-get install -y mingw-w64` 完成。
+  - 本地 Windows 交叉编译探针通过：
+    - `cmake -S . -B /tmp/vmp_mingw_probe -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=x86_64 -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_CXX_COMPILER=x86_64-w64-mingw32-g++ -DVMP_PLATFORM=windows -DVMP_ARCH=x64`
+    - `cmake --build /tmp/vmp_mingw_probe --target vmp-protect vmp-trampoline-inject vmp-cpp-fallback-scan -j2`
+  - 干净导出 `HEAD` + staged minimal patch 后再次运行同等 MinGW 构建：通过，确认测试分支不依赖工作区未提交大改动。
+  - 注意：本地交叉编译不能执行 PE；真实运行和 evidence artifact 仍必须由 GitHub `windows-latest` 产出。
+- 未完成项：
+  - 尚未进入 GitHub Windows integration/evidence collector。
+  - 需要提交并推送第四个 commit，等待新的 run。
+- 下一子任务建议：
+  - 推送 Windows 编译兼容修复；若第四轮进入 protected PE 原生执行失败，再按 integration stdout/stderr 修复。

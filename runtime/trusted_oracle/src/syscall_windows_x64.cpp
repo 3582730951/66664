@@ -31,7 +31,7 @@ std::uint32_t resolve_syscall_number(const char* name) {
   if (ntdll == nullptr) {
     return 0;
   }
-  auto* bytes = static_cast<const std::uint8_t*>(::GetProcAddress(ntdll, name));
+  auto* bytes = reinterpret_cast<const std::uint8_t*>(::GetProcAddress(ntdll, name));
   if (bytes == nullptr) {
     return 0;
   }
