@@ -85,7 +85,7 @@ jobs:
       - name: Validate Windows external-live evidence
         shell: pwsh
         run: |
-          python paper/scripts/validate_external_live.py "reports/external_live_matrix_windows_${{ github.run_id }}.json"
+          python paper/scripts/validate_external_live.py --bundle-root reports "reports/external_live_matrix_windows_${{ github.run_id }}.json"
 
       - name: Upload Windows evidence reports
         uses: actions/upload-artifact@v4

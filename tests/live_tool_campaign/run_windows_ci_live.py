@@ -52,6 +52,13 @@ def rel(path: Path) -> str:
         return path.name
 
 
+def bundle_rel(path: Path, bundle_root: Path) -> str:
+    try:
+        return path.resolve().relative_to(bundle_root.resolve()).as_posix()
+    except ValueError:
+        return rel(path)
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -85,10 +92,10 @@ def ensure_text_file(path: Path) -> None:
         write_text(path, "")
 
 
-def evidence_artifact(path: Path, kind: str) -> dict[str, str]:
+def evidence_artifact(path: Path, kind: str, bundle_root: Path) -> dict[str, str]:
     if not path.exists():
         raise FileNotFoundError(f"missing evidence artifact: {rel(path)}")
-    item = {"path": rel(path), "kind": kind}
+    item = {"path": bundle_rel(path, bundle_root), "kind": kind}
     item["sha256"] = sha256_file(path)
     return item
 
@@ -186,7 +193,7 @@ def make_check(
     }
 
 
-def collect_native_check(binary: Path, iterations: int, expected: str, raw_dir: Path) -> dict[str, Any]:
+def collect_native_check(binary: Path, iterations: int, expected: str, raw_dir: Path, bundle_root: Path) -> dict[str, Any]:
     audit_path = raw_dir / "windows_native_audit.log"
     result = run_target(binary, iterations, audit_path)
     stdout_log = raw_dir / "windows_native_stdout.log"
@@ -212,9 +219,9 @@ def collect_native_check(binary: Path, iterations: int, expected: str, raw_dir: 
         ],
         limitations=["One GitHub-hosted Windows runner image and one protected PE sample."],
         artifacts=[
-            evidence_artifact(stdout_log, "stdout"),
-            evidence_artifact(stderr_log, "stderr"),
-            evidence_artifact(audit_path, "audit-log"),
+            evidence_artifact(stdout_log, "stdout", bundle_root),
+            evidence_artifact(stderr_log, "stderr", bundle_root),
+            evidence_artifact(audit_path, "audit-log", bundle_root),
         ],
     )
 
@@ -358,7 +365,7 @@ def run_cmd_under_windows_debugger(command_line: str, audit_path: Path, timeout_
         kernel32.CloseHandle(proc_info.hProcess)
 
 
-def collect_debugger_check(binary: Path, iterations: int, expected: str, raw_dir: Path) -> dict[str, Any]:
+def collect_debugger_check(binary: Path, iterations: int, expected: str, raw_dir: Path, bundle_root: Path) -> dict[str, Any]:
     audit_path = raw_dir / "windows_debugapi_audit.log"
     stdout_log = raw_dir / "windows_debugapi_stdout.log"
     stderr_log = raw_dir / "windows_debugapi_stderr.log"
@@ -392,15 +399,15 @@ def collect_debugger_check(binary: Path, iterations: int, expected: str, raw_dir
         ],
         limitations=["GitHub-hosted Windows runner only; Debug API launch, not manual WinDbg/cdb interaction."],
         artifacts=[
-            evidence_artifact(stdout_log, "stdout"),
-            evidence_artifact(stderr_log, "stderr"),
-            evidence_artifact(audit_path, "audit-log"),
-            evidence_artifact(meta_log, "debugger-metadata"),
+            evidence_artifact(stdout_log, "stdout", bundle_root),
+            evidence_artifact(stderr_log, "stderr", bundle_root),
+            evidence_artifact(audit_path, "audit-log", bundle_root),
+            evidence_artifact(meta_log, "debugger-metadata", bundle_root),
         ],
     )
 
 
-def collect_frida_check(binary: Path, iterations: int, expected: str, raw_dir: Path) -> dict[str, Any]:
+def collect_frida_check(binary: Path, iterations: int, expected: str, raw_dir: Path, bundle_root: Path) -> dict[str, Any]:
     try:
         import frida  # type: ignore
     except Exception as exc:
@@ -476,10 +483,10 @@ def collect_frida_check(binary: Path, iterations: int, expected: str, raw_dir: P
         ],
         limitations=["Depends on Frida availability and timing on GitHub-hosted Windows runners."],
         artifacts=[
-            evidence_artifact(stdout_log, "stdout"),
-            evidence_artifact(stderr_log, "stderr"),
-            evidence_artifact(audit_path, "audit-log"),
-            evidence_artifact(meta_log, "frida-metadata"),
+            evidence_artifact(stdout_log, "stdout", bundle_root),
+            evidence_artifact(stderr_log, "stderr", bundle_root),
+            evidence_artifact(audit_path, "audit-log", bundle_root),
+            evidence_artifact(meta_log, "frida-metadata", bundle_root),
         ],
     )
 
@@ -536,10 +543,11 @@ def main() -> int:
 
     expected = target_expected(binary, args.iterations)
     raw_dir = report_dir / f"windows_live_{stamp()}"
+    bundle_root = report_dir.resolve()
     checks: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []
 
-    native = collect_native_check(binary, args.iterations, expected, raw_dir)
+    native = collect_native_check(binary, args.iterations, expected, raw_dir, bundle_root)
     if not native["ok"]:
         raise SystemExit("Windows native execution check failed; not writing claim-bearing evidence report")
     checks.append(native)
@@ -549,7 +557,7 @@ def main() -> int:
         optional_collectors.append(("windows_frida_attach", collect_frida_check))
     for check_id, collector in optional_collectors:
         try:
-            check = collector(binary, args.iterations, expected, raw_dir)
+            check = collector(binary, args.iterations, expected, raw_dir, bundle_root)
             if check.get("ok") is True or args.keep_failed:
                 checks.append(check)
             else:
@@ -564,7 +572,7 @@ def main() -> int:
         "paper_claims_mutated": False,
         "runner": runner_metadata(args.frida),
         "target": {
-            "binary": rel(binary),
+            "binary": bundle_rel(binary, bundle_root),
             "sha256": sha256_file(binary),
             "iterations": args.iterations,
             "expected_result": expected,

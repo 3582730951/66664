@@ -4964,3 +4964,27 @@
   - Windows 证据当前支持 platform correctness 与 Debug API launch survival；仍不支持 Frida/hardware-breakpoint detector coverage 声明。
 - 下一子任务建议：
   - 基于第六轮 artifact、validator 输出、performance 报告和非声明边界，启动 5 个审核 agent 做 3 轮一致性评分；若任一轮低于 80% 或结论不一致，再继续修证据/代码。
+
+## windows_ci_live_evidence_multiagent_round1_fix_20260506
+- 本轮清单：
+  - 启动 5 个审核 agent 对第六轮 Windows CI artifact 做 3 轮只读审核，统一 rubric：authenticity 25、scope honesty 20、reproducibility 20、CI correctness 15、residual risk 20。
+  - 审核结果不满足验收标准：agent 1/2/3/4 三轮 PASS，agent 5 三轮 FAIL（76/75/76），因此按“3轮有一轮不过都要修改”继续修复。
+  - agent 5 的主要可修复意见：JSON 中 `evidence_artifacts[*].path` 使用 `reports/...`，但 GitHub artifact 解压后 bundle root 会剥离 `reports/` 前缀，导致路径不能直接按 artifact root 命中。
+  - 修复 collector：`target.binary` 与 `evidence_artifacts[*].path` 改为相对上传 bundle root（`reports/`）的路径，例如 `windows_live_.../windows_native_stdout.log`、`integration_artifacts_.../target_c.protected.exe`。
+  - 修复 validator：新增 `--bundle-root`，校验 target/evidence artifact 文件在 bundle root 下真实存在且 sha256 匹配。
+  - 修复 workflow：CI 的 external-live validation 现在执行 `python paper/scripts/validate_external_live.py --bundle-root reports ...`，在上传前就验证 bundle 路径闭环。
+- 变更文件：
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/paper/scripts/validate_external_live.py`
+  - `/workspace/vmp/.github/workflows/windows_live_evidence.yml`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py tests/integration_targets/run_integration_ci.py`：通过。
+  - `python3 paper/scripts/validate_external_live.py --help`：通过，`--bundle-root` 参数可见。
+  - `python3 tests/live_tool_campaign/run_windows_ci_live.py --help`：通过。
+  - synthetic external-live bundle probe：`python3 paper/scripts/validate_external_live.py --bundle-root /tmp/external_live_bundle_probe /tmp/external_live_bundle_probe/report.json` 通过，确认 bundle-root 路径和 sha256 校验生效。
+- 未完成项：
+  - 需要提交并推送该路径闭环修复，跑第七轮 `windows-live-evidence`，下载新 artifact 并按 bundle root 直接验证 JSON 路径。
+  - 第七轮成功后必须重新进行 5 agent × 3 round 审核；当前第六轮审核已有 FAIL，不能作为最终验收通过。
+- 下一子任务建议：
+  - 推送后等待第七轮 CI；若仍低于 80%，优先补多样本/Frida/debugger detector/hardware breakpoint/Rust PE 中最能降低 residual risk 的项。

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import re
 import sys
@@ -39,6 +40,14 @@ def fail(msg: str) -> None:
 def require(condition: bool, msg: str) -> None:
     if not condition:
         fail(msg)
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def load_json(path: Path) -> Any:
@@ -105,7 +114,16 @@ def validate_target(target: Any) -> None:
     require(isinstance(target["expected_result"], (str, int)), "target.expected_result: expected string or integer")
 
 
-def validate_evidence_artifacts(check: dict[str, Any], ctx: str) -> None:
+def validate_bundle_file(path_value: str, expected_sha256: str, bundle_root: Path | None, ctx: str) -> None:
+    if bundle_root is None:
+        return
+    bundle_path = bundle_root / path_value
+    require(bundle_path.exists() and bundle_path.is_file(), f"{ctx}: missing file under bundle root: {path_value}")
+    observed_sha256 = sha256_file(bundle_path)
+    require(observed_sha256 == expected_sha256.lower(), f"{ctx}: sha256 mismatch for {path_value}")
+
+
+def validate_evidence_artifacts(check: dict[str, Any], ctx: str, bundle_root: Path | None) -> None:
     artifacts = check.get("evidence_artifacts", [])
     require(isinstance(artifacts, list), f"{ctx}.evidence_artifacts: expected list")
     for idx, artifact in enumerate(artifacts):
@@ -116,9 +134,10 @@ def validate_evidence_artifacts(check: dict[str, Any], ctx: str) -> None:
         require_string(artifact, "kind", actx, 2)
         require("sha256" in artifact, f"{actx}.sha256: required for traceable evidence artifacts")
         require(isinstance(artifact["sha256"], str) and SHA256_RE.match(artifact["sha256"]), f"{actx}.sha256: expected 64 hex characters")
+        validate_bundle_file(path, artifact["sha256"], bundle_root, actx)
 
 
-def validate_check(check: Any, idx: int, target_expected: Any) -> bool:
+def validate_check(check: Any, idx: int, target_expected: Any, bundle_root: Path | None) -> bool:
     ctx = f"checks[{idx}]"
     require(isinstance(check, dict), f"{ctx}: expected object")
     check_id = require_string(check, "id", ctx, 1)
@@ -156,11 +175,11 @@ def validate_check(check: Any, idx: int, target_expected: Any) -> bool:
     require(isinstance(non_claims, list) and len(non_claims) > 0, f"{ctx}.non_claims: expected non-empty list")
     limitations = check.get("limitations")
     require(isinstance(limitations, list) and len(limitations) > 0, f"{ctx}.limitations: expected non-empty list")
-    validate_evidence_artifacts(check, ctx)
+    validate_evidence_artifacts(check, ctx, bundle_root)
     return ok
 
 
-def validate_report(path: Path, allow_absolute_paths: bool) -> None:
+def validate_report(path: Path, allow_absolute_paths: bool, bundle_root: Path | None) -> None:
     data = load_json(path)
     require(isinstance(data, dict), f"{path}: expected top-level object")
     check_no_path_leak(data, str(path), allow_absolute_paths)
@@ -170,9 +189,12 @@ def validate_report(path: Path, allow_absolute_paths: bool) -> None:
     require(data.get("paper_claims_mutated") is False, f"{path}.paper_claims_mutated must be false")
     validate_runner(data.get("runner"))
     validate_target(data.get("target"))
+    if bundle_root is not None:
+        target = data["target"]
+        validate_bundle_file(target["binary"], target["sha256"], bundle_root, "target.binary")
     checks = data.get("checks")
     require(isinstance(checks, list) and len(checks) > 0, f"{path}.checks: expected non-empty list")
-    check_ok = [validate_check(check, idx, data["target"]["expected_result"]) for idx, check in enumerate(checks)]
+    check_ok = [validate_check(check, idx, data["target"]["expected_result"], bundle_root) for idx, check in enumerate(checks)]
     require(data.get("ok") == all(check_ok), f"{path}.ok must equal all(check.ok)")
     limitations = data.get("limitations")
     require(isinstance(limitations, list) and len(limitations) > 0, f"{path}.limitations: expected non-empty list")
@@ -187,6 +209,7 @@ def main() -> int:
     parser.add_argument("reports", nargs="*", type=Path, help="external_live_matrix_*.json files to validate")
     parser.add_argument("--require-report", action="store_true", help="fail if no report paths are supplied or discovered")
     parser.add_argument("--allow-absolute-paths", action="store_true", help="permit local absolute paths in non-submission scratch reports")
+    parser.add_argument("--bundle-root", type=Path, help="validate target/evidence artifact paths and sha256 values relative to this uploaded bundle root")
     args = parser.parse_args()
 
     if not SCHEMA_PATH.exists():
@@ -208,11 +231,19 @@ def main() -> int:
         print(msg)
         return 0
 
+    bundle_root = None
+    if args.bundle_root is not None:
+        bundle_root = args.bundle_root if args.bundle_root.is_absolute() else (ROOT / args.bundle_root)
+        bundle_root = bundle_root.resolve()
+        if not bundle_root.exists() or not bundle_root.is_dir():
+            print(f"FAIL: bundle root does not exist or is not a directory: {bundle_root}", file=sys.stderr)
+            return 1
+
     try:
         for report in reports:
             if not report.exists():
                 fail(f"{report}: report does not exist")
-            validate_report(report, args.allow_absolute_paths)
+            validate_report(report, args.allow_absolute_paths, bundle_root)
     except ValidationError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
