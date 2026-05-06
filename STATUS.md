@@ -4942,3 +4942,25 @@
   - 目前 Windows 证据可支持 platform correctness 与 Debug API launch survival；仍不能声称 Frida detector coverage 或 hardware-breakpoint detector coverage。
 - 下一子任务建议：
   - 第六轮 CI 成功后下载 artifact，验证每个 `evidence_artifacts` 路径均在 zip 内存在且 sha256 匹配，再进入五代理三轮审核。
+
+## windows_ci_live_evidence_github_run6_20260506
+- 本轮清单：
+  - 推送 commit `4b9ba1b` 后触发第六轮 `windows-live-evidence`，run ID `25432893196`。
+  - 第六轮 CI 完成且结论为 `success`，真实 artifact `windows-live-evidence-25432893196` 已生成。
+  - 下载 artifact `6829275005` 后复核：JSON 声明的 stdout/stderr/audit-log/debugger-metadata 文件均在 zip 内真实存在。
+  - 对每个 `evidence_artifacts[*].sha256` 逐项重算并比对：全部匹配。
+  - Windows native execution 与 Windows Debug API launch 均 `ok=true`，输出均为 `target_c fib40=102334155 checksum=9080872688760629372 secret_len=27`。
+  - Debug API metadata 显示 `debug_events=48`、`exit_code=0`。
+  - Frida attach 仍诚实记录为 skipped；本轮不声称 Frida detector coverage。
+- 变更文件：
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - GitHub run `25432893196`：`completed/success`。
+  - `python3 paper/scripts/validate_external_live.py /tmp/windows-live-evidence-25432893196/external_live_matrix_windows_25432893196.json`：通过。
+  - 本地 artifact sha verifier：通过，native/debug stdout/stderr/audit/meta 全部存在且 sha256 匹配。
+  - `performance_20260506.md`：`x86_64-windows/target_c` baseline/protected 均正确，protected overhead ratio 为 `1.0578`。
+- 未完成项：
+  - 尚未完成五代理三轮一致性审核。
+  - Windows 证据当前支持 platform correctness 与 Debug API launch survival；仍不支持 Frida/hardware-breakpoint detector coverage 声明。
+- 下一子任务建议：
+  - 基于第六轮 artifact、validator 输出、performance 报告和非声明边界，启动 5 个审核 agent 做 3 轮一致性评分；若任一轮低于 80% 或结论不一致，再继续修证据/代码。
