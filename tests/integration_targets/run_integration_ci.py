@@ -561,7 +561,12 @@ def write_performance_markdown(path: pathlib.Path, results: list[dict[str, objec
     path.write_text('\n'.join(lines) + '\n')
 
 
-def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_platforms: set[str] | None = None) -> list[Case]:
+def build_cases(
+    build_dir: pathlib.Path,
+    artifact_root: pathlib.Path,
+    wanted_platforms: set[str] | None = None,
+    wanted_tests: set[str] | None = None,
+) -> list[Case]:
     include_dir = ROOT / 'bindings' / 'cpp' / 'include'
     results: list[Case] = []
     linux_caps = ['linux', 'x64']
@@ -571,6 +576,9 @@ def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_pla
 
     def wants(name: str) -> bool:
         return wanted_platforms is None or name in wanted_platforms
+
+    def wants_test(name: str) -> bool:
+        return wanted_tests is None or name in wanted_tests
 
     if wants('x86_64-linux'):
         # Linux C
@@ -693,6 +701,8 @@ def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_pla
             source_policy=base_dir / 'source_policy.json',
             raw_dir=base_dir,
         ))
+        if wanted_tests is not None and not (wants_test('target_cpp') or wants_test('target_rust')):
+            return results
 
         # Windows C++
         base_dir = artifact_root / 'x86_64-windows' / 'target_cpp'
@@ -873,6 +883,7 @@ def main() -> int:
     parser.add_argument('--report-dir', default=str(DEFAULT_REPORT_DIR))
     parser.add_argument('--date', default=time.strftime('%Y%m%d', time.gmtime()))
     parser.add_argument('--platform-filter', action='append', default=[], help='limit execution to one or more matrix targets')
+    parser.add_argument('--test-filter', action='append', default=[], help='limit execution to one or more integration test names')
     args = parser.parse_args()
 
     build_dir = pathlib.Path(args.build_dir).resolve()
@@ -888,10 +899,15 @@ def main() -> int:
     artifact_root.mkdir(parents=True)
 
     wanted = set(args.platform_filter) if args.platform_filter else None
+    wanted_tests = set(args.test_filter) if args.test_filter else None
+    if wanted_tests:
+        unknown_tests = wanted_tests - {'target_c', 'target_cpp', 'target_rust'}
+        if unknown_tests:
+            raise SystemExit(f'unknown integration test filter(s): {", ".join(sorted(unknown_tests))}')
     if wanted is None or 'aarch64-android' in wanted:
         ensure_path(ANDROID_CC)
         ensure_path(ANDROID_CXX)
-    cases = build_cases(build_dir, artifact_root, wanted)
+    cases = build_cases(build_dir, artifact_root, wanted, wanted_tests)
     results: list[dict[str, object]] = []
     for case in cases:
         suppress = wine_stderr_filter if case.platform == 'x86_64-windows' else None

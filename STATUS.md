@@ -4890,3 +4890,26 @@
   - 需要提交并推送第四个 commit，等待新的 run。
 - 下一子任务建议：
   - 推送 Windows 编译兼容修复；若第四轮进入 protected PE 原生执行失败，再按 integration stdout/stderr 修复。
+
+## windows_ci_live_evidence_github_run4_20260506
+- 本轮清单：
+  - 推送 commit `cf4bae4` 后触发第四轮 `windows-live-evidence`，run ID `25432118074`。
+  - 第四轮已通过 `Configure Windows host tools` 与 `Build Windows host tools`，说明 Windows/MinGW 构建兼容修复有效。
+  - 失败推进到 `Build and execute protected Windows integration targets`；日志显示 Windows Rust 目标保护阶段报错：`rewriter: PE symbol not found: bench_rust_vm_core`。
+  - 判断：当前 Windows live evidence collector 默认消费 `target_c.protected.exe`，Rust 目标不是本次 Windows live evidence 的必要证据项；让 Rust 目标阻塞该 job 会降低证据产出效率。
+  - 新增 integration test filter，并让 `windows-live-evidence` 仅构建/执行 `x86_64-windows/target_c`，先产出真实 Windows runner artifact。
+- 变更文件：
+  - `/workspace/vmp/tests/integration_targets/run_integration_ci.py`
+  - `/workspace/vmp/.github/workflows/windows_live_evidence.yml`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - `python3 -m py_compile tests/integration_targets/run_integration_ci.py tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py`：通过。
+  - `python3 tests/integration_targets/run_integration_ci.py --help`：通过，新增 `--test-filter` 参数可见。
+  - `git diff --check -- tests/integration_targets/run_integration_ci.py .github/workflows/windows_live_evidence.yml STATUS.md`：通过。
+  - 对本轮变更文件执行认证材料关键字扫描：未发现 PAT、Basic auth header 或 embedded credential URL。
+  - 仍未获得成功的 GitHub Windows evidence artifact；下一轮 run 必须继续等待真实结果。
+- 未完成项：
+  - 需要提交并推送该 filter 修复，观察第五轮 `windows-live-evidence` 是否进入 external-live collector 并上传 artifact。
+  - Windows Rust PE 符号查找问题另行登记，不能作为本轮 Windows target_c live evidence 的阻塞项。
+- 下一子任务建议：
+  - 推送后拉取第五轮 run 日志和 artifact；若 artifact 校验通过，再把 Windows live evidence 纳入五代理三轮审核依据。

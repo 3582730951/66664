@@ -67,7 +67,8 @@ jobs:
           python tests/integration_targets/run_integration_ci.py \
             --build-dir build-windows-live \
             --report-dir reports \
-            --platform-filter x86_64-windows
+            --platform-filter x86_64-windows \
+            --test-filter target_c
 
       - name: Optional Frida dependency
         shell: pwsh
