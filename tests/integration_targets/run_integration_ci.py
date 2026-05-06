@@ -672,100 +672,101 @@ def build_cases(
         ))
 
     if wants('x86_64-windows'):
-        # Windows C
-        base_dir = artifact_root / 'x86_64-windows' / 'target_c'
-        base_dir.mkdir(parents=True, exist_ok=True)
-        baseline = base_dir / 'target_c.exe'
-        protected = base_dir / 'target_c.protected.exe'
-        compile_windows_c(TEST_ROOT / 'target_c.c', baseline, include_dir, base_dir / 'compile.log')
-        bundle_windows_runtime(baseline)
-        collect_cpp_source_policy(TEST_ROOT / 'target_c.c', base_dir / 'source_policy.json', build_dir, base_dir / 'source_policy.log')
-        full_policy = base_dir / 'binary_full_policy.json'
-        empty_policy = base_dir / 'binary_empty_policy.json'
-        write_policy(full_policy, windows_caps, [
-            make_entry('protected_mix_c', platform_caps=windows_caps, vm_func=True),
-            make_entry('kProtectedCString', platform_caps=windows_caps, vm_string=True),
-        ])
-        write_policy(empty_policy, windows_caps, [])
-        protect_windows(build_dir, baseline, full_policy, protected, base_dir)
-        results.append(Case(
-            platform='x86_64-windows',
-            test='target_c',
-            baseline_artifact=baseline,
-            protected_artifact=protected,
-            baseline_cmd=windows_target_cmd(baseline, 1000),
-            protected_cmd=windows_target_cmd(protected, 1000),
-            expected_output=expected_target_c(1000),
-            full_policy=full_policy,
-            trampoline_policy=empty_policy,
-            source_policy=base_dir / 'source_policy.json',
-            raw_dir=base_dir,
-        ))
-        if wanted_tests is not None and not (wants_test('target_cpp') or wants_test('target_rust')):
-            return results
+        if wants_test('target_c'):
+            # Windows C
+            base_dir = artifact_root / 'x86_64-windows' / 'target_c'
+            base_dir.mkdir(parents=True, exist_ok=True)
+            baseline = base_dir / 'target_c.exe'
+            protected = base_dir / 'target_c.protected.exe'
+            compile_windows_c(TEST_ROOT / 'target_c.c', baseline, include_dir, base_dir / 'compile.log')
+            bundle_windows_runtime(baseline)
+            collect_cpp_source_policy(TEST_ROOT / 'target_c.c', base_dir / 'source_policy.json', build_dir, base_dir / 'source_policy.log')
+            full_policy = base_dir / 'binary_full_policy.json'
+            empty_policy = base_dir / 'binary_empty_policy.json'
+            write_policy(full_policy, windows_caps, [
+                make_entry('protected_mix_c', platform_caps=windows_caps, vm_func=True),
+                make_entry('kProtectedCString', platform_caps=windows_caps, vm_string=True),
+            ])
+            write_policy(empty_policy, windows_caps, [])
+            protect_windows(build_dir, baseline, full_policy, protected, base_dir)
+            results.append(Case(
+                platform='x86_64-windows',
+                test='target_c',
+                baseline_artifact=baseline,
+                protected_artifact=protected,
+                baseline_cmd=windows_target_cmd(baseline, 1000),
+                protected_cmd=windows_target_cmd(protected, 1000),
+                expected_output=expected_target_c(1000),
+                full_policy=full_policy,
+                trampoline_policy=empty_policy,
+                source_policy=base_dir / 'source_policy.json',
+                raw_dir=base_dir,
+            ))
 
-        # Windows C++
-        base_dir = artifact_root / 'x86_64-windows' / 'target_cpp'
-        base_dir.mkdir(parents=True, exist_ok=True)
-        baseline = base_dir / 'target_cpp.exe'
-        protected = base_dir / 'target_cpp.protected.exe'
-        compile_windows_cpp(TEST_ROOT / 'target_cpp.cpp', baseline, include_dir, base_dir / 'compile.log')
-        bundle_windows_runtime(baseline)
-        collect_cpp_source_policy(TEST_ROOT / 'target_cpp.cpp', base_dir / 'source_policy.json', build_dir, base_dir / 'source_policy.log')
-        full_policy = base_dir / 'binary_full_policy.json'
-        empty_policy = base_dir / 'binary_empty_policy.json'
-        write_policy(full_policy, windows_caps, [
-            make_entry('protected_mix_cpp', platform_caps=windows_caps, vm_func=True),
-            make_entry('kProtectedCppString', platform_caps=windows_caps, vm_string=True),
-        ])
-        write_policy(empty_policy, windows_caps, [])
-        protect_windows(build_dir, baseline, full_policy, protected, base_dir)
-        results.append(Case(
-            platform='x86_64-windows',
-            test='target_cpp',
-            baseline_artifact=baseline,
-            protected_artifact=protected,
-            baseline_cmd=windows_target_cmd(baseline, 1000),
-            protected_cmd=windows_target_cmd(protected, 1000),
-            expected_output=expected_target_cpp(1000),
-            full_policy=full_policy,
-            trampoline_policy=empty_policy,
-            source_policy=base_dir / 'source_policy.json',
-            raw_dir=base_dir,
-        ))
+        if wants_test('target_cpp'):
+            # Windows C++
+            base_dir = artifact_root / 'x86_64-windows' / 'target_cpp'
+            base_dir.mkdir(parents=True, exist_ok=True)
+            baseline = base_dir / 'target_cpp.exe'
+            protected = base_dir / 'target_cpp.protected.exe'
+            compile_windows_cpp(TEST_ROOT / 'target_cpp.cpp', baseline, include_dir, base_dir / 'compile.log')
+            bundle_windows_runtime(baseline)
+            collect_cpp_source_policy(TEST_ROOT / 'target_cpp.cpp', base_dir / 'source_policy.json', build_dir, base_dir / 'source_policy.log')
+            full_policy = base_dir / 'binary_full_policy.json'
+            empty_policy = base_dir / 'binary_empty_policy.json'
+            write_policy(full_policy, windows_caps, [
+                make_entry('protected_mix_cpp', platform_caps=windows_caps, vm_func=True),
+                make_entry('kProtectedCppString', platform_caps=windows_caps, vm_string=True),
+            ])
+            write_policy(empty_policy, windows_caps, [])
+            protect_windows(build_dir, baseline, full_policy, protected, base_dir)
+            results.append(Case(
+                platform='x86_64-windows',
+                test='target_cpp',
+                baseline_artifact=baseline,
+                protected_artifact=protected,
+                baseline_cmd=windows_target_cmd(baseline, 1000),
+                protected_cmd=windows_target_cmd(protected, 1000),
+                expected_output=expected_target_cpp(1000),
+                full_policy=full_policy,
+                trampoline_policy=empty_policy,
+                source_policy=base_dir / 'source_policy.json',
+                raw_dir=base_dir,
+            ))
 
-        # Windows Rust
-        base_dir = artifact_root / 'x86_64-windows' / 'target_rust'
-        base_dir.mkdir(parents=True, exist_ok=True)
-        baseline = build_rust(TEST_ROOT / 'rust_target', 'x86_64-pc-windows-gnu', rust_target_dir, base_dir / 'compile.log')
-        bundle_windows_runtime(baseline)
-        baseline_copy = base_dir / 'target_rust.exe'
-        shutil.copy2(baseline, baseline_copy)
-        bundle_windows_runtime(baseline_copy)
-        collect_rust_source_policy(TEST_ROOT / 'rust_target', rust_target_dir, base_dir / 'source_policy.json', build_dir,
-                                   base_dir / 'source_policy.log', windows_caps)
-        full_policy = base_dir / 'binary_full_policy.json'
-        empty_policy = base_dir / 'binary_empty_policy.json'
-        protected = base_dir / 'target_rust.protected.exe'
-        write_policy(full_policy, windows_caps, [
-            make_entry('bench_rust_vm_core', platform_caps=windows_caps, vm_func=True),
-            make_entry('RUST_SECRET_BYTES', platform_caps=windows_caps, vm_string=True),
-        ])
-        write_policy(empty_policy, windows_caps, [])
-        protect_windows(build_dir, baseline_copy, full_policy, protected, base_dir)
-        results.append(Case(
-            platform='x86_64-windows',
-            test='target_rust',
-            baseline_artifact=baseline_copy,
-            protected_artifact=protected,
-            baseline_cmd=windows_target_cmd(baseline_copy, 1000),
-            protected_cmd=windows_target_cmd(protected, 1000),
-            expected_output=expected_target_rust(1000),
-            full_policy=full_policy,
-            trampoline_policy=empty_policy,
-            source_policy=base_dir / 'source_policy.json',
-            raw_dir=base_dir,
-        ))
+        if wants_test('target_rust'):
+            # Windows Rust
+            base_dir = artifact_root / 'x86_64-windows' / 'target_rust'
+            base_dir.mkdir(parents=True, exist_ok=True)
+            baseline = build_rust(TEST_ROOT / 'rust_target', 'x86_64-pc-windows-gnu', rust_target_dir, base_dir / 'compile.log')
+            bundle_windows_runtime(baseline)
+            baseline_copy = base_dir / 'target_rust.exe'
+            shutil.copy2(baseline, baseline_copy)
+            bundle_windows_runtime(baseline_copy)
+            collect_rust_source_policy(TEST_ROOT / 'rust_target', rust_target_dir, base_dir / 'source_policy.json', build_dir,
+                                       base_dir / 'source_policy.log', windows_caps)
+            full_policy = base_dir / 'binary_full_policy.json'
+            empty_policy = base_dir / 'binary_empty_policy.json'
+            protected = base_dir / 'target_rust.protected.exe'
+            write_policy(full_policy, windows_caps, [
+                make_entry('bench_rust_vm_core', platform_caps=windows_caps, vm_func=True),
+                make_entry('RUST_SECRET_BYTES', platform_caps=windows_caps, vm_string=True),
+            ])
+            write_policy(empty_policy, windows_caps, [])
+            protect_windows(build_dir, baseline_copy, full_policy, protected, base_dir)
+            results.append(Case(
+                platform='x86_64-windows',
+                test='target_rust',
+                baseline_artifact=baseline_copy,
+                protected_artifact=protected,
+                baseline_cmd=windows_target_cmd(baseline_copy, 1000),
+                protected_cmd=windows_target_cmd(protected, 1000),
+                expected_output=expected_target_rust(1000),
+                full_policy=full_policy,
+                trampoline_policy=empty_policy,
+                source_policy=base_dir / 'source_policy.json',
+                raw_dir=base_dir,
+            ))
 
     if wants('aarch64-android'):
         # Android C

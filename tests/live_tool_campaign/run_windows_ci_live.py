@@ -111,19 +111,19 @@ def target_expected(binary: Path, iterations: int) -> str:
     raise SystemExit(f"cannot infer expected output for target directory: {test_name}")
 
 
-def discover_default_binary(report_dir: Path, integration_date: str | None) -> Path:
+def discover_default_binary(report_dir: Path, integration_date: str | None, test_name: str) -> Path:
     if integration_date:
-        candidate = report_dir / f"integration_artifacts_{integration_date}" / "x86_64-windows" / "target_c" / "target_c.protected.exe"
+        candidate = report_dir / f"integration_artifacts_{integration_date}" / "x86_64-windows" / test_name / f"{test_name}.protected.exe"
         if candidate.exists():
             return candidate
         raise SystemExit(f"missing Windows protected target: {rel(candidate)}")
     candidates = sorted(
-        report_dir.glob("integration_artifacts_*/x86_64-windows/target_c/target_c.protected.exe"),
+        report_dir.glob(f"integration_artifacts_*/x86_64-windows/{test_name}/{test_name}.protected.exe"),
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
     if not candidates:
-        raise SystemExit("missing Windows protected target under reports/integration_artifacts_*/x86_64-windows/target_c")
+        raise SystemExit(f"missing Windows protected target under reports/integration_artifacts_*/x86_64-windows/{test_name}")
     return candidates[0]
 
 
@@ -524,7 +524,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Collect Windows CI live evidence JSON")
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
     parser.add_argument("--integration-date", help="YYYYMMDD integration artifact date; defaults to newest Windows artifact")
-    parser.add_argument("--binary", type=Path, help="protected PE to run; defaults to target_c.protected.exe from integration artifacts")
+    parser.add_argument("--default-test", choices=["target_c", "target_cpp", "target_rust"], default="target_c",
+                        help="integration target to auto-discover when --binary is not supplied")
+    parser.add_argument("--binary", type=Path, help="protected PE to run; defaults to --default-test protected PE from integration artifacts")
     parser.add_argument("--iterations", type=int, default=100_000)
     parser.add_argument("--output", type=Path, default=DEFAULT_REPORT_DIR / f"external_live_matrix_windows_{stamp()}.json")
     parser.add_argument("--frida", action="store_true", help="attempt optional Frida attach evidence if frida is installed")
@@ -532,7 +534,7 @@ def main() -> int:
     args = parser.parse_args()
 
     report_dir = args.report_dir if args.report_dir.is_absolute() else (ROOT / args.report_dir)
-    binary = args.binary if args.binary else discover_default_binary(report_dir, args.integration_date)
+    binary = args.binary if args.binary else discover_default_binary(report_dir, args.integration_date, args.default_test)
     if not binary.is_absolute():
         binary = ROOT / binary
     binary = binary.resolve()
@@ -541,8 +543,9 @@ def main() -> int:
     if args.iterations <= 0:
         raise SystemExit("--iterations must be positive")
 
+    test_name = binary.parent.name
     expected = target_expected(binary, args.iterations)
-    raw_dir = report_dir / f"windows_live_{stamp()}"
+    raw_dir = report_dir / f"windows_live_{test_name}_{stamp()}"
     bundle_root = report_dir.resolve()
     checks: list[dict[str, Any]] = []
     skipped: list[dict[str, str]] = []

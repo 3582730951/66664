@@ -68,7 +68,8 @@ jobs:
             --build-dir build-windows-live \
             --report-dir reports \
             --platform-filter x86_64-windows \
-            --test-filter target_c
+            --test-filter target_c \
+            --test-filter target_cpp
 
       - name: Optional Frida dependency
         shell: pwsh
@@ -80,19 +81,20 @@ jobs:
       - name: Collect Windows external-live evidence
         shell: pwsh
         run: |
-          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --frida --output "reports/external_live_matrix_windows_${{ github.run_id }}.json"
+          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --default-test target_c --frida --output "reports/external_live_matrix_windows_target_c_${{ github.run_id }}.json"
+          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --default-test target_cpp --frida --output "reports/external_live_matrix_windows_target_cpp_${{ github.run_id }}.json"
 
       - name: Validate Windows external-live evidence
         shell: pwsh
         run: |
-          python paper/scripts/validate_external_live.py --bundle-root reports "reports/external_live_matrix_windows_${{ github.run_id }}.json"
+          python paper/scripts/validate_external_live.py --bundle-root reports "reports/external_live_matrix_windows_target_c_${{ github.run_id }}.json" "reports/external_live_matrix_windows_target_cpp_${{ github.run_id }}.json"
 
       - name: Upload Windows evidence reports
         uses: actions/upload-artifact@v4
         with:
           name: windows-live-evidence-${{ github.run_id }}
           path: |
-            reports/external_live_matrix_windows_${{ github.run_id }}.json
+            reports/external_live_matrix_windows_*_${{ github.run_id }}.json
             reports/windows_live_*/
             reports/integration_artifacts_*/
             reports/performance_*.json

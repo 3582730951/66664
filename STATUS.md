@@ -4988,3 +4988,30 @@
   - 第七轮成功后必须重新进行 5 agent × 3 round 审核；当前第六轮审核已有 FAIL，不能作为最终验收通过。
 - 下一子任务建议：
   - 推送后等待第七轮 CI；若仍低于 80%，优先补多样本/Frida/debugger detector/hardware breakpoint/Rust PE 中最能降低 residual risk 的项。
+
+## windows_ci_live_evidence_github_run7_multisample_prep_20260506
+- 本轮清单：
+  - 推送 commit `e4c4a46` 后触发第七轮 `windows-live-evidence`，run ID `25433535629`。
+  - 第七轮 CI 完成且结论为 `success`，说明新增 `--bundle-root reports` 上传前校验通过。
+  - 下载 artifact `6829551713` 到 `/tmp/windows-live-evidence-25433535629` 后，用解压目录作为 bundle root 直接运行 `validate_external_live.py --bundle-root`：通过。
+  - 逐项复核第七轮 JSON：`target.binary` 与所有 `evidence_artifacts[*].path` 均可直接相对 artifact root 命中，sha256 全部匹配。
+  - 为降低 multi-agent 审核中的“单样本”扣分，扩展 Windows live evidence scope：CI integration 改为同时构建/执行 `target_c` 与 `target_cpp`，external-live collector 分别生成 `target_c`/`target_cpp` 两个报告，并在 CI 中一次性用 `--bundle-root reports` 校验两个报告。
+  - 保持诚实边界：Windows Rust 仍未纳入本轮 evidence，不把 Rust PE、Frida detector、debugger detector audit event 或 hardware-breakpoint 覆盖计为已完成。
+- 变更文件：
+  - `/workspace/vmp/.github/workflows/windows_live_evidence.yml`
+  - `/workspace/vmp/tests/integration_targets/run_integration_ci.py`
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - GitHub run `25433535629`：`completed/success`。
+  - `python3 paper/scripts/validate_external_live.py --bundle-root /tmp/windows-live-evidence-25433535629 /tmp/windows-live-evidence-25433535629/external_live_matrix_windows_25433535629.json`：通过。
+  - 第七轮 artifact 直接路径核验：target binary、native/debug stdout/stderr/audit/meta 全部存在且 sha256 匹配。
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py tests/integration_targets/run_integration_ci.py`：通过。
+  - `python3 tests/live_tool_campaign/run_windows_ci_live.py --help` 与 `python3 tests/integration_targets/run_integration_ci.py --help`：通过。
+  - `.github/workflows/windows_live_evidence.yml` YAML 解析：通过。
+  - `git diff --check` 与本轮变更文件认证材料关键字扫描：通过。
+- 未完成项：
+  - 需要提交并推送 `target_c + target_cpp` 多样本扩展，跑第八轮 CI，下载两个 external-live JSON 并分别校验。
+  - 第八轮成功后重新进行 5 agent × 3 round 审核；第六轮审核结果因 agent 5 FAIL 不能作为最终验收。
+- 下一子任务建议：
+  - 若第八轮多样本仍无法让全部 agent 达到 ≥80%，下一优先级是补真实 debugger detector audit event 或硬件断点 Windows 覆盖；Frida 因 GitHub runner attach 时序不稳定，作为次优项处理。
