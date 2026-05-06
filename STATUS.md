@@ -5103,3 +5103,39 @@
   - 仍需单独做论文/PDF 与已发表论文版式对比，并按差距修改 PDF 源文件。
 - 下一子任务建议：
   - 推送 detector fixture evidence commit，等待 Windows CI 完成并复核 artifact；若证据真实有效，再重新执行 5 agent × 3 round 审核。
+
+## advisor_review_response_sqlite_pdf_ci_fix_20260506
+- 本轮清单：
+  - 采纳导师四点风险：形式化贡献过窄、评估目标偏微型、证据链包装过重、缺少 Tigress/主流 protector 同负载 baseline。
+  - 新增真实组件级实验脚本 `paper/scripts/run_sqlite_case_study.py`：静态链接 SQLite 3.40.1，保护真实 SQLite 符号 `sqlite3_step`，跑 5000 次 in-memory insert + aggregate query。
+  - 生成 `reports/sqlite_case_study_20260506.json`：40 次 baseline/protected 全部输出一致，baseline median `23.7887 ms`，protected median `24.0260 ms`，median ratio `1.0100x`。
+  - TJSS 稿件从 `elsarticle[final,3p,times]` 切换为 `elsarticle[final,5p,times]`，PDF 从单栏提交稿观感改为更接近 JSS 已发表终版的双栏观感。
+  - TJSS 正文修改：形式化章节改为“Formal Model and Claim Boundaries”，明确定理是设计契约/模型 sanity check，不是 C++/Rust 实现安全证明；评估章节加入 SQLite case study；Discussion/Limitations 明确缺少 Tigress/商业 protector 同负载 baseline，不能做主流 protector 排名。
+  - Windows detector CI run `25436076535` 失败，原因是 debugger fixture 通过 `cmd.exe /c` 重定向包装启动后 Debug API loop 等不到 root process exit；已改为直接 `CreateProcessW(DEBUG_PROCESS)` 启动 fixture，证据以 audit/meta 为主。
+- 变更文件：
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/paper/scripts/run_sqlite_case_study.py`
+  - `/workspace/vmp/reports/sqlite_case_study_20260506.json`
+  - `/workspace/vmp/reports/sqlite_case_study_20260506/*`
+  - `/workspace/tjss/manuscript/main.tex`
+  - `/workspace/tjss/manuscript/sections/abstract.tex`
+  - `/workspace/tjss/manuscript/sections/introduction.tex`
+  - `/workspace/tjss/manuscript/sections/formal_analysis.tex`
+  - `/workspace/tjss/manuscript/sections/evaluation.tex`
+  - `/workspace/tjss/manuscript/sections/discussion.tex`
+  - `/workspace/tjss/manuscript/sections/limitations.tex`
+  - `/workspace/tjss/manuscript/sections/conclusion.tex`
+  - `/workspace/tjss/paper/**` 与 `/workspace/tjss/supplementary/**` 对应镜像文件
+- 验证结果：
+  - `apt-get install -y sqlite3 libsqlite3-dev`：完成，用于 SQLite case study。
+  - `python3 paper/scripts/run_sqlite_case_study.py --runs 40 --iterations 5000 --raw-dir reports/sqlite_case_study_20260506 --output reports/sqlite_case_study_20260506.json`：通过。
+  - `/workspace/tjss/manuscript/main.pdf` 重新编译通过，`mutool info` 显示 11 页，字体嵌入正常；LaTeX log 无 Overfull，只有 Underfull/hyperref PDF string warning。
+  - `/workspace/tjss/paper/tests/validate_paper.py`：通过。
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py tests/integration_targets/run_integration_ci.py paper/scripts/run_sqlite_case_study.py`：通过。
+  - 本轮相关文件令牌/手机号扫描：未发现 GitHub token 或明文手机号。
+- 未完成项：
+  - Windows CI 修复尚未提交推送并重跑；上一轮 `25436076535` 不能作为通过证据。
+  - SQLite case study 仍不是大型数据库服务/浏览器级 case study；只能降低 microbenchmark 质疑，不能消除。
+  - 仍缺少 Tigress/主流 protector 同负载 baseline；已在论文限制中诚实承认。
+- 下一子任务建议：
+  - 提交并推送 Windows debugger fixture 直启修复与 SQLite/PDF 响应材料，等待新 Windows CI；若成功再下载 artifact 核验 detector fixture audit events，并重新进行 5 agent × 3 round 审核。

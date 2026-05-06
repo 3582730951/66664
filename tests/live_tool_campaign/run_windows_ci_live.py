@@ -620,11 +620,10 @@ def collect_debugger_detector_fixture_check(fixture_dir: Path, raw_dir: Path, bu
     audit_path = raw_dir / f"{check_id}.audit.log"
     stdout_log = raw_dir / f"{check_id}.stdout.log"
     stderr_log = raw_dir / f"{check_id}.stderr.log"
-    quoted = subprocess.list2cmdline([str(fixture), str(audit_path)])
-    cmd_line = f'cmd.exe /d /s /c "{quoted} > {subprocess.list2cmdline([str(stdout_log)])} 2> {subprocess.list2cmdline([str(stderr_log)])}"'
+    cmd_line = subprocess.list2cmdline([str(fixture), str(audit_path)])
     result = run_cmd_under_windows_debugger(cmd_line, audit_path, timeout_sec=60)
-    ensure_text_file(stdout_log)
-    ensure_text_file(stderr_log)
+    write_text(stdout_log, "stdout was not redirected; fixture evidence is recorded in audit and metadata artifacts.\n")
+    write_text(stderr_log, "")
     ensure_text_file(audit_path)
     stdout_text = stdout_log.read_text(encoding="utf-8", errors="ignore")
     audit_text = audit_path.read_text(encoding="utf-8", errors="ignore")
@@ -643,10 +642,10 @@ def collect_debugger_detector_fixture_check(fixture_dir: Path, raw_dir: Path, bu
         alias="Windows-Debugger-Detector-Fixture",
         category="debugger",
         tool="windows-debug-api-fixture",
-        command_summary="CreateProcessW(DEBUG_PROCESS) around windows_debugger_detector_fixture",
+        command_summary="CreateProcessW(DEBUG_PROCESS) directly around windows_debugger_detector_fixture <audit-log>",
         ok=ok,
         audit_text=audit_text,
-        observed=stdout_text.strip().replace("\r\n", "\n").replace("\r", ""),
+        observed=f"exit_code={result['exit_code']} debug_events={result['debug_events']} event_present={expected_event in audit_text}",
         claim_scope="A Windows detector fixture emitted debugger_detected while launched under the Windows Debug API on the CI runner.",
         non_claims=[
             "This positive-control fixture does not claim that protected PE samples themselves emitted debugger_detected.",
