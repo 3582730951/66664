@@ -6,6 +6,7 @@ import json
 import math
 import os
 import pathlib
+import re
 import shutil
 import stat
 import shlex
@@ -28,6 +29,7 @@ ANDROID_TLS_PATCH = TEST_ROOT / 'android_tls_align_fix.py'
 RUSTUP_CARGO = pathlib.Path(os.environ.get('VMP_CARGO', pathlib.Path.home() / '.cargo' / 'bin' / 'cargo'))
 RUSTUP_RUSTUP = pathlib.Path(os.environ.get('VMP_RUSTUP', pathlib.Path.home() / '.cargo' / 'bin' / 'rustup'))
 MASK64 = (1 << 64) - 1
+METADATA_MAGIC = b'\x91\xc4\x5a\x17'
 
 
 @dataclass(frozen=True)
@@ -45,15 +47,33 @@ class Case:
     raw_dir: pathlib.Path
 
 
+def is_windows_host() -> bool:
+    return os.name == 'nt' or sys.platform.startswith('win')
+
+
+def host_executable_path(path: pathlib.Path) -> pathlib.Path:
+    if path.exists():
+        return path
+    if is_windows_host() and path.suffix.lower() != '.exe':
+        candidate = path.with_name(path.name + '.exe')
+        if candidate.exists():
+            return candidate
+    return path
+
+
 def ensure_path(path: pathlib.Path) -> pathlib.Path:
+    path = host_executable_path(path)
     if not path.exists():
         raise SystemExit(f'required path not found: {path}')
     return path
 
 
+def build_tool(build_dir: pathlib.Path, name: str) -> pathlib.Path:
+    return ensure_path(build_dir / 'tools' / name)
+
+
 def tool_from_path(path: pathlib.Path) -> str:
-    ensure_path(path)
-    return str(path)
+    return str(ensure_path(path))
 
 
 def tool_or_die(name: str) -> str:
@@ -61,6 +81,12 @@ def tool_or_die(name: str) -> str:
     if not path:
         raise SystemExit(f'required tool not found: {name}')
     return path
+
+
+def windows_target_cmd(binary: pathlib.Path, iterations: int) -> list[str]:
+    if is_windows_host():
+        return [str(binary), str(iterations)]
+    return [tool_or_die('wine'), str(binary), str(iterations)]
 
 
 def run(cmd: list[str], *, cwd: pathlib.Path | None = None, env: dict[str, str] | None = None,
@@ -210,22 +236,43 @@ def expected_target_cpp(iterations: int) -> str:
 
 
 def expected_target_rust(iterations: int) -> str:
-    secret = 'rust-target::runtime::sigma'
-    checksum = 0x0DDC0FFEEEC0FFEE
-    fib = fib20_recursive(20)
+    secret = b'rust-target::runtime::sigma'
+    fib = fib20_recursive(35)
+    result = (0x0DDC0FFEEEC0FFEE ^ fib) & MASK64
+
     for i in range(iterations):
-        values = [(((ord(byte) if isinstance(byte, str) else byte) + idx * 9 + i) % 97) + 1 for idx, byte in enumerate(secret.encode()[:8])]
-        values.append((fib + i) % 97 + 1)
-        values.sort()
-        local = sum(values)
-        mix = ((local + fib) * 0x9E3779B185EBCA87) & MASK64
-        mix ^= ((values[-1] + i) * 0xC2B2AE3D27D4EB4F) & MASK64
-        mix = rotl64(mix, 13)
-        mix ^= ((local + fib) + ((values[-1] + i) << 7)) & MASK64
-        checksum ^= mix & MASK64
-        checksum = rotl64(checksum, (i % 17) + 1)
-        checksum = (checksum + values[0] + len(values)) & MASK64
-    return f'target_rust fib20={fib} checksum={checksum} secret_len={len(secret)}'
+        state = [((fib + i * 17 + idx * 31 + secret[idx % len(secret)]) % 1_000_003) + 1 for idx in range(256)]
+        state.sort(reverse=True)
+        local_sum = sum(state[:48]) & MASK64
+        tail_mix = 0
+        for value in list(reversed(state))[:12]:
+            tail_mix ^= rotl64(value, 3)
+
+        core_x = (local_sum + fib) & MASK64
+        core_y = (tail_mix + i) & MASK64
+        mixed = (core_x + 0x9E3779B97F4A7C15) & MASK64
+        mixed ^= (core_y + 0x632BE59BD9B4E019) & MASK64
+        mixed = (mixed + (((core_x << 3) & MASK64) ^ ((core_y << 1) & MASK64))) & MASK64
+        result ^= (mixed ^ 0xA24BAED4963EE407) & MASK64
+        result &= MASK64
+
+        tramp_x = result ^ local_sum
+        tramp_y = (tail_mix + i + 7) & MASK64
+        mixed_x = tramp_x ^ 0x1122334455667788
+        mixed_y = tramp_y ^ 0x8877665544332211
+        lane = ((tramp_x << 1) & MASK64) | (tramp_y >> 1)
+        result = (result + ((((mixed_x + mixed_y) & MASK64) ^ lane) & MASK64)) & MASK64
+        result = rotl64(result, (i % 17) + 1)
+        result = (result + (state[i % len(state)] ^ state[len(state) // 2])) & MASK64
+
+    return f'rust_target result={result}'
+
+
+def output_matches_expected(actual: str, expected: str) -> bool:
+    actual = actual.strip()
+    if expected.startswith('rust_target result='):
+        return re.fullmatch(rf'{re.escape(expected)} elapsed_ms=\d+(?:\.\d+)?', actual) is not None
+    return actual == expected
 
 
 
@@ -277,6 +324,22 @@ def compile_windows_cpp(source: pathlib.Path, output: pathlib.Path, include_dir:
     bundle_windows_runtime(output)
 
 
+def compile_linux_c(source: pathlib.Path, output: pathlib.Path, include_dir: pathlib.Path, log: pathlib.Path) -> None:
+    run([
+        tool_or_die('gcc'), '-std=c11', '-O2', '-fno-pie', '-no-pie',
+        '-I', str(include_dir), '-Wno-attributes', '-o', str(output), str(source)
+    ], log_path=log)
+    chmod_x(output)
+
+
+def compile_linux_cpp(source: pathlib.Path, output: pathlib.Path, include_dir: pathlib.Path, log: pathlib.Path) -> None:
+    run([
+        tool_or_die('g++'), '-std=c++17', '-O2', '-fno-pie', '-no-pie',
+        '-I', str(include_dir), '-Wno-attributes', '-o', str(output), str(source)
+    ], log_path=log)
+    chmod_x(output)
+
+
 def compile_android_c(source: pathlib.Path, output: pathlib.Path, include_dir: pathlib.Path, log: pathlib.Path) -> None:
     run([
         tool_from_path(ANDROID_CC), '-O2', '-static', '-I', str(include_dir), '-Wno-ignored-attributes',
@@ -295,15 +358,33 @@ def compile_android_cpp(source: pathlib.Path, output: pathlib.Path, include_dir:
     chmod_x(output)
 
 
-def build_rust(crate_dir: pathlib.Path, target: str, output_dir: pathlib.Path, log: pathlib.Path) -> pathlib.Path:
+def build_rust(crate_dir: pathlib.Path, target: str | None, output_dir: pathlib.Path, log: pathlib.Path) -> pathlib.Path:
     env = {
         'PATH': f'{pathlib.Path.home() / ".cargo" / "bin"}{os.pathsep}{os.environ.get("PATH", "")}',
         'CARGO_TARGET_DIR': str(output_dir),
     }
     cargo_cmd = [tool_from_path(RUSTUP_CARGO)]
-    if target == 'x86_64-pc-windows-gnu':
+    target_name = target or 'host'
+    if target is None:
+        cmd = cargo_cmd + [
+            'rustc',
+            '--manifest-path',
+            str(crate_dir / 'Cargo.toml'),
+            '--release',
+            '--bin',
+            'integration-rust-target',
+            '--',
+            '-C',
+            'relocation-model=static',
+            '-C',
+            'link-arg=-no-pie',
+            '-C',
+            'link-arg=-Wl,--build-id=none',
+        ]
+    elif target == 'x86_64-pc-windows-gnu':
         env['CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER'] = tool_or_die('x86_64-w64-mingw32-gcc')
         env['RUSTFLAGS'] = '-C target-feature=+crt-static'
+        cmd = cargo_cmd + ['build', '--manifest-path', str(crate_dir / 'Cargo.toml'), '--release', '--target', target]
     elif target == 'aarch64-linux-android':
         android_rust_cc = tool_from_path(ANDROID_BIN / 'aarch64-linux-android34-clang')
         env['CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER'] = android_rust_cc
@@ -311,33 +392,35 @@ def build_rust(crate_dir: pathlib.Path, target: str, output_dir: pathlib.Path, l
         env['CC_aarch64_linux_android'] = android_rust_cc
         env['RUSTFLAGS'] = ' '.join([
             '-C panic=abort',
+            '-C target-feature=+crt-static',
             '-C relocation-model=static',
             '-C link-arg=-static',
-            '-C link-arg=-nostdlib',
-            '-C link-arg=-nostartfiles',
-            '-C link-arg=-Wl,-e,_start',
             '-C link-arg=-Wl,--build-id=none',
         ])
+        cmd = cargo_cmd + ['build', '--manifest-path', str(crate_dir / 'Cargo.toml'), '--release', '--target', target]
     else:
         raise SystemExit(f'unsupported rust target: {target}')
 
-    run(cargo_cmd + [
-        'build', '--manifest-path', str(crate_dir / 'Cargo.toml'), '--release', '--target', target
-    ], cwd=ROOT, env=env, log_path=log)
+    run(cmd, cwd=ROOT, env=env, log_path=log)
 
-    name = 'integration-rust-target.exe' if target.endswith('windows-gnu') else 'integration-rust-target'
-    output = output_dir / target / 'release' / name
+    if target is None:
+        output = output_dir / 'release' / 'integration-rust-target'
+    else:
+        name = 'integration-rust-target.exe' if target.endswith('windows-gnu') else 'integration-rust-target'
+        output = output_dir / target_name / 'release' / name
     ensure_path(output)
     if target == 'aarch64-linux-android':
         run([tool_or_die('python3'), str(ANDROID_TLS_PATCH), str(output)], log_path=log.with_name(log.stem + '.tls.log'))
         chmod_x(output)
     elif target == 'x86_64-pc-windows-gnu':
         bundle_windows_runtime(output)
+    elif target is None:
+        chmod_x(output)
     return output
 
 
 def collect_cpp_source_policy(source: pathlib.Path, out: pathlib.Path, build_dir: pathlib.Path, log: pathlib.Path) -> None:
-    scanner = build_dir / 'tools' / 'vmp-cpp-fallback-scan'
+    scanner = build_tool(build_dir, 'vmp-cpp-fallback-scan')
     run([str(scanner), str(source), f'--policy-out={out}'], log_path=log)
 
 
@@ -346,7 +429,7 @@ def collect_rust_source_policy(crate_dir: pathlib.Path, target_dir: pathlib.Path
     base = out.with_name(out.stem + '.base.json')
     write_policy(base, platform_caps, [])
     run([
-        str(build_dir / 'tools' / 'vmp-protect'), '--policy', str(base), '--rust-target-dir', str(target_dir),
+        str(build_tool(build_dir, 'vmp-protect')), '--policy', str(base), '--rust-target-dir', str(target_dir),
         '--emit-policy-json', str(out), '--validate-only'
     ], log_path=log)
 
@@ -355,12 +438,27 @@ def protect_windows(build_dir: pathlib.Path, baseline: pathlib.Path, full_policy
                     raw_dir: pathlib.Path) -> None:
     stage1 = protected.with_name(protected.stem + '.stage1' + protected.suffix)
     run([
-        str(build_dir / 'tools' / 'vmp-protect'), '--policy', str(full_policy), '--input', str(baseline), '--output', str(stage1)
+        str(build_tool(build_dir, 'vmp-protect')), '--policy', str(full_policy), '--input', str(baseline), '--output', str(stage1)
     ], log_path=raw_dir / 'protect.log')
     run([
-        str(build_dir / 'tools' / 'vmp-trampoline-inject'), '--policy', str(full_policy), '--input', str(stage1), '--output', str(protected)
+        str(build_tool(build_dir, 'vmp-trampoline-inject')), '--policy', str(full_policy), '--input', str(stage1), '--output', str(protected)
     ], log_path=raw_dir / 'trampoline.log')
     bundle_windows_runtime(protected)
+
+
+def protect_linux(build_dir: pathlib.Path, baseline: pathlib.Path, full_policy: pathlib.Path, protected: pathlib.Path,
+                  raw_dir: pathlib.Path) -> None:
+    string_pool = raw_dir / 'string_pool.bin'
+    string_idx = raw_dir / 'string_pool.idx.json'
+    string_kdf = raw_dir / 'string_pool.kdf.json'
+    run([
+        str(build_tool(build_dir, 'vmp-protect')), '--policy', str(full_policy), '--input', str(baseline), '--output', str(protected),
+        '--lift', '--strings-pool', str(string_pool), '--strings-idx', str(string_idx), '--string-kdf', str(string_kdf)
+    ], log_path=raw_dir / 'protect.log')
+    chmod_x(protected)
+    protected_bytes = protected.read_bytes()
+    if METADATA_MAGIC not in protected_bytes:
+        raise SystemExit(f'encrypted metadata missing from protected artifact: {protected}')
 
 
 def protect_android(build_dir: pathlib.Path, baseline: pathlib.Path, full_policy: pathlib.Path, trampoline_policy: pathlib.Path,
@@ -370,11 +468,11 @@ def protect_android(build_dir: pathlib.Path, baseline: pathlib.Path, full_policy
     string_idx = raw_dir / 'string_pool.idx.json'
     string_kdf = raw_dir / 'string_pool.kdf.json'
     run([
-        str(build_dir / 'tools' / 'vmp-trampoline-inject'), '--policy', str(trampoline_policy), '--input', str(baseline), '--output', str(stage1)
+        str(build_tool(build_dir, 'vmp-trampoline-inject')), '--policy', str(trampoline_policy), '--input', str(baseline), '--output', str(stage1)
     ], log_path=raw_dir / 'trampoline.log')
     chmod_x(stage1)
     run([
-        str(build_dir / 'tools' / 'vmp-protect'), '--policy', str(full_policy), '--input', str(stage1), '--output', str(protected),
+        str(build_tool(build_dir, 'vmp-protect')), '--policy', str(full_policy), '--input', str(stage1), '--output', str(protected),
         '--strings-pool', str(string_pool), '--strings-idx', str(string_idx), '--string-kdf', str(string_kdf)
     ], log_path=raw_dir / 'protect.log')
     chmod_x(protected)
@@ -414,8 +512,8 @@ def execute_case(case: Case, *, stderr_suppression: Callable[[str], str] | None 
 
     baseline_out, baseline_ms, baseline_rc, baseline_stderr = run_one(case.baseline_cmd, 'baseline.run.log')
     protected_out, protected_ms, protected_rc, protected_stderr = run_one(case.protected_cmd, 'protected.run.log')
-    baseline_correct = baseline_rc == 0 and baseline_out == case.expected_output
-    protected_correct = protected_rc == 0 and protected_out == case.expected_output
+    baseline_correct = baseline_rc == 0 and output_matches_expected(baseline_out, case.expected_output)
+    protected_correct = protected_rc == 0 and output_matches_expected(protected_out, case.expected_output)
 
     if baseline_correct and not protected_correct:
         message = (
@@ -466,12 +564,104 @@ def write_performance_markdown(path: pathlib.Path, results: list[dict[str, objec
 def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_platforms: set[str] | None = None) -> list[Case]:
     include_dir = ROOT / 'bindings' / 'cpp' / 'include'
     results: list[Case] = []
+    linux_caps = ['linux', 'x64']
     windows_caps = ['windows', 'x64']
     android_caps = ['android', 'arm64']
     rust_target_dir = artifact_root / 'rust-target-build'
 
     def wants(name: str) -> bool:
         return wanted_platforms is None or name in wanted_platforms
+
+    if wants('x86_64-linux'):
+        # Linux C
+        base_dir = artifact_root / 'x86_64-linux' / 'target_c'
+        base_dir.mkdir(parents=True, exist_ok=True)
+        baseline = base_dir / 'target_c'
+        protected = base_dir / 'target_c.protected'
+        compile_linux_c(TEST_ROOT / 'target_c.c', baseline, include_dir, base_dir / 'compile.log')
+        collect_cpp_source_policy(TEST_ROOT / 'target_c.c', base_dir / 'source_policy.json', build_dir, base_dir / 'source_policy.log')
+        full_policy = base_dir / 'binary_full_policy.json'
+        empty_policy = base_dir / 'binary_empty_policy.json'
+        write_policy(full_policy, linux_caps, [
+            make_entry('protected_mix_c', platform_caps=linux_caps, vm_func=True),
+            make_entry('kProtectedCString', platform_caps=linux_caps, vm_string=True),
+        ])
+        write_policy(empty_policy, linux_caps, [])
+        protect_linux(build_dir, baseline, full_policy, protected, base_dir)
+        results.append(Case(
+            platform='x86_64-linux',
+            test='target_c',
+            baseline_artifact=baseline,
+            protected_artifact=protected,
+            baseline_cmd=[str(baseline), '1000'],
+            protected_cmd=[str(protected), '1000'],
+            expected_output=expected_target_c(1000),
+            full_policy=full_policy,
+            trampoline_policy=empty_policy,
+            source_policy=base_dir / 'source_policy.json',
+            raw_dir=base_dir,
+        ))
+
+        # Linux C++
+        base_dir = artifact_root / 'x86_64-linux' / 'target_cpp'
+        base_dir.mkdir(parents=True, exist_ok=True)
+        baseline = base_dir / 'target_cpp'
+        protected = base_dir / 'target_cpp.protected'
+        compile_linux_cpp(TEST_ROOT / 'target_cpp.cpp', baseline, include_dir, base_dir / 'compile.log')
+        collect_cpp_source_policy(TEST_ROOT / 'target_cpp.cpp', base_dir / 'source_policy.json', build_dir, base_dir / 'source_policy.log')
+        full_policy = base_dir / 'binary_full_policy.json'
+        empty_policy = base_dir / 'binary_empty_policy.json'
+        write_policy(full_policy, linux_caps, [
+            make_entry('protected_mix_cpp', platform_caps=linux_caps, vm_func=True),
+            make_entry('kProtectedCppString', platform_caps=linux_caps, vm_string=True),
+        ])
+        write_policy(empty_policy, linux_caps, [])
+        protect_linux(build_dir, baseline, full_policy, protected, base_dir)
+        results.append(Case(
+            platform='x86_64-linux',
+            test='target_cpp',
+            baseline_artifact=baseline,
+            protected_artifact=protected,
+            baseline_cmd=[str(baseline), '1000'],
+            protected_cmd=[str(protected), '1000'],
+            expected_output=expected_target_cpp(1000),
+            full_policy=full_policy,
+            trampoline_policy=empty_policy,
+            source_policy=base_dir / 'source_policy.json',
+            raw_dir=base_dir,
+        ))
+
+        # Linux Rust
+        base_dir = artifact_root / 'x86_64-linux' / 'target_rust'
+        base_dir.mkdir(parents=True, exist_ok=True)
+        baseline = build_rust(TEST_ROOT / 'rust_target', None, rust_target_dir, base_dir / 'compile.log')
+        baseline_copy = base_dir / 'target_rust'
+        shutil.copy2(baseline, baseline_copy)
+        chmod_x(baseline_copy)
+        collect_rust_source_policy(TEST_ROOT / 'rust_target', rust_target_dir, base_dir / 'source_policy.json', build_dir,
+                                   base_dir / 'source_policy.log', linux_caps)
+        full_policy = base_dir / 'binary_full_policy.json'
+        empty_policy = base_dir / 'binary_empty_policy.json'
+        protected = base_dir / 'target_rust.protected'
+        write_policy(full_policy, linux_caps, [
+            make_entry('bench_rust_vm_core', platform_caps=linux_caps, vm_func=True),
+            make_entry('RUST_SECRET_BYTES', platform_caps=linux_caps, vm_string=True),
+        ])
+        write_policy(empty_policy, linux_caps, [])
+        protect_linux(build_dir, baseline_copy, full_policy, protected, base_dir)
+        results.append(Case(
+            platform='x86_64-linux',
+            test='target_rust',
+            baseline_artifact=baseline_copy,
+            protected_artifact=protected,
+            baseline_cmd=[str(baseline_copy), '1000'],
+            protected_cmd=[str(protected), '1000'],
+            expected_output=expected_target_rust(1000),
+            full_policy=full_policy,
+            trampoline_policy=empty_policy,
+            source_policy=base_dir / 'source_policy.json',
+            raw_dir=base_dir,
+        ))
 
     if wants('x86_64-windows'):
         # Windows C
@@ -495,8 +685,8 @@ def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_pla
             test='target_c',
             baseline_artifact=baseline,
             protected_artifact=protected,
-            baseline_cmd=[tool_or_die('wine'), str(baseline), '1000'],
-            protected_cmd=[tool_or_die('wine'), str(protected), '1000'],
+            baseline_cmd=windows_target_cmd(baseline, 1000),
+            protected_cmd=windows_target_cmd(protected, 1000),
             expected_output=expected_target_c(1000),
             full_policy=full_policy,
             trampoline_policy=empty_policy,
@@ -525,8 +715,8 @@ def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_pla
             test='target_cpp',
             baseline_artifact=baseline,
             protected_artifact=protected,
-            baseline_cmd=[tool_or_die('wine'), str(baseline), '1000'],
-            protected_cmd=[tool_or_die('wine'), str(protected), '1000'],
+            baseline_cmd=windows_target_cmd(baseline, 1000),
+            protected_cmd=windows_target_cmd(protected, 1000),
             expected_output=expected_target_cpp(1000),
             full_policy=full_policy,
             trampoline_policy=empty_policy,
@@ -548,7 +738,7 @@ def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_pla
         empty_policy = base_dir / 'binary_empty_policy.json'
         protected = base_dir / 'target_rust.protected.exe'
         write_policy(full_policy, windows_caps, [
-            make_entry('protected_mix_rust', platform_caps=windows_caps, vm_func=True),
+            make_entry('bench_rust_vm_core', platform_caps=windows_caps, vm_func=True),
             make_entry('RUST_SECRET_BYTES', platform_caps=windows_caps, vm_string=True),
         ])
         write_policy(empty_policy, windows_caps, [])
@@ -558,8 +748,8 @@ def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_pla
             test='target_rust',
             baseline_artifact=baseline_copy,
             protected_artifact=protected,
-            baseline_cmd=[tool_or_die('wine'), str(baseline_copy), '1000'],
-            protected_cmd=[tool_or_die('wine'), str(protected), '1000'],
+            baseline_cmd=windows_target_cmd(baseline_copy, 1000),
+            protected_cmd=windows_target_cmd(protected, 1000),
             expected_output=expected_target_rust(1000),
             full_policy=full_policy,
             trampoline_policy=empty_policy,
@@ -640,6 +830,7 @@ def build_cases(build_dir: pathlib.Path, artifact_root: pathlib.Path, wanted_pla
         empty_policy = base_dir / 'binary_empty_policy.json'
         protected = base_dir / 'target_rust.protected'
         write_policy(full_policy, android_caps, [
+            make_entry('bench_rust_vm_core', platform_caps=android_caps, vm_func=True),
             make_entry('RUST_SECRET_BYTES', platform_caps=android_caps, vm_string=True),
         ])
         write_policy(empty_policy, android_caps, [])
@@ -686,8 +877,8 @@ def main() -> int:
 
     build_dir = pathlib.Path(args.build_dir).resolve()
     report_dir = pathlib.Path(args.report_dir).resolve()
-    ensure_path(build_dir / 'tools' / 'vmp-protect')
-    ensure_path(build_dir / 'tools' / 'vmp-trampoline-inject')
+    build_tool(build_dir, 'vmp-protect')
+    build_tool(build_dir, 'vmp-trampoline-inject')
     ensure_path(RUSTUP_CARGO)
     ensure_path(RUSTUP_RUSTUP)
 

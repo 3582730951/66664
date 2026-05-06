@@ -1,0 +1,98 @@
+name: windows-live-evidence
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows_live_evidence.yml"
+      - "paper/scripts/validate_external_live.py"
+      - "paper/schemas/external_live_matrix.schema.json"
+      - "tests/integration_targets/**"
+      - "tests/live_tool_campaign/run_windows_ci_live.py"
+      - "runtime/**"
+      - "tools/**"
+      - "CMakeLists.txt"
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  windows-live-evidence:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          path-type: inherit
+          install: >-
+            base-devel
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-python
+
+      - name: Configure Windows host tools
+        run: |
+          cmake -S . -B build-windows-live -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DVMP_PLATFORM=windows \
+            -DVMP_ARCH=x64
+
+      - name: Build Windows host tools
+        run: |
+          cmake --build build-windows-live --target \
+            vmp-protect \
+            vmp-trampoline-inject \
+            vmp-cpp-fallback-scan \
+            -j
+
+      - name: Build and execute protected Windows integration targets
+        run: |
+          python tests/integration_targets/run_integration_ci.py \
+            --build-dir build-windows-live \
+            --report-dir reports \
+            --platform-filter x86_64-windows
+
+      - name: Optional Frida dependency
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install frida-tools
+
+      - name: Collect Windows external-live evidence
+        shell: pwsh
+        run: |
+          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --frida --output "reports/external_live_matrix_windows_${{ github.run_id }}.json"
+
+      - name: Validate Windows external-live evidence
+        shell: pwsh
+        run: |
+          python paper/scripts/validate_external_live.py "reports/external_live_matrix_windows_${{ github.run_id }}.json"
+
+      - name: Upload Windows evidence reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-live-evidence-${{ github.run_id }}
+          path: |
+            reports/external_live_matrix_windows_${{ github.run_id }}.json
+            reports/windows_live_*/
+            reports/integration_artifacts_*/
+            reports/performance_*.json
+            reports/performance_*.md
