@@ -175,6 +175,7 @@
             "dbi",
             "emulator",
             "debugger",
+            "hardware_breakpoint",
             "mapping_integrity",
             "platform"
           ]

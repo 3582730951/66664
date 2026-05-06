@@ -8,7 +8,9 @@
 #include <stdexcept>
 #include <string>
 
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#include <process.h>
+#else
 #include <unistd.h>
 #endif
 

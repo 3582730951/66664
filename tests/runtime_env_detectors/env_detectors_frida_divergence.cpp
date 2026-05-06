@@ -6,11 +6,12 @@
 
 #include "test_common.h"
 
-int main() {
+int main(int argc, char** argv) {
   using namespace vmp::runtime::env_detectors;
   using namespace vmp::tests::runtime_env_detectors;
 
-  const auto audit_path = temp_path("env_detectors_frida_divergence", ".log");
+  const auto audit_path =
+      argc > 1 ? std::filesystem::path(argv[1]) : temp_path("env_detectors_frida_divergence", ".log");
   std::filesystem::remove(audit_path);
 
   EnvironmentDetectorSupervisor detectors(bytes16(0x41), audit_path);

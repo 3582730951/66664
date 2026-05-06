@@ -9,6 +9,7 @@ on:
       - "paper/schemas/external_live_matrix.schema.json"
       - "tests/integration_targets/**"
       - "tests/live_tool_campaign/run_windows_ci_live.py"
+      - "tests/runtime_env_detectors/**"
       - "runtime/**"
       - "tools/**"
       - "CMakeLists.txt"
@@ -60,6 +61,9 @@ jobs:
             vmp-protect \
             vmp-trampoline-inject \
             vmp-cpp-fallback-scan \
+            windows_debugger_detector_fixture \
+            env_detectors_hardware_breakpoint_cross_check \
+            env_detectors_frida_divergence \
             -j
 
       - name: Build and execute protected Windows integration targets
@@ -81,8 +85,8 @@ jobs:
       - name: Collect Windows external-live evidence
         shell: pwsh
         run: |
-          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --default-test target_c --frida --output "reports/external_live_matrix_windows_target_c_${{ github.run_id }}.json"
-          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --default-test target_cpp --frida --output "reports/external_live_matrix_windows_target_cpp_${{ github.run_id }}.json"
+          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --fixture-dir build-windows-live/tests --default-test target_c --frida --output "reports/external_live_matrix_windows_target_c_${{ github.run_id }}.json"
+          python tests/live_tool_campaign/run_windows_ci_live.py --report-dir reports --fixture-dir build-windows-live/tests --default-test target_cpp --frida --output "reports/external_live_matrix_windows_target_cpp_${{ github.run_id }}.json"
 
       - name: Validate Windows external-live evidence
         shell: pwsh

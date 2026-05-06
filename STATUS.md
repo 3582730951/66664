@@ -4383,8 +4383,8 @@
 
 ## tjss_phone_metadata_update_20260506
 - 本轮清单：
-  - 按用户明确提供的私人手机号 `+8617388659705` 更新 TJSS 离线提交包。
-  - 将号码写入 `/workspace/tjss/submission_files/Title_page.txt`，格式化为 `+86 173 8865 9705`。
+  - 按用户明确提供的私人手机号更新 TJSS 离线提交包；状态日志仅保留脱敏说明。
+  - 将号码写入 `/workspace/tjss/submission_files/Title_page.txt`；状态日志不记录明文号码。
   - 同步更新 `SUBMISSION_CHECKLIST.md`、`README_TJSS_SUBMISSION.md`、`MANUAL_ACTIONS_BEFORE_SUBMISSION.md`、`COMPLETION_AUDIT.md`、`FINAL_GOAL_CHECKLIST.md`，把 phone-number 缺口从 package blocker 改为“真实投稿系统 metadata 仍需填同号”。
   - 重建 `/workspace/tjss/source_file_manifest.txt`。
 - 变更文件：
@@ -4401,7 +4401,7 @@
   - `python3 /workspace/tjss/paper/tests/validate_paper.py`：`paper compatibility validation OK`。
   - `submission_files/Title_page.txt` 已包含：
     - `Email: hengzhuoliang@gmail.com`
-    - `Phone: +86 173 8865 9705`
+    - `Phone: <redacted private phone>`
   - `SUBMISSION_CHECKLIST.md` 中 `Corresponding-author phone number added to title page.` 已勾选。
 - 未完成项：
   - 离线 JSS package 层面的 phone-number 缺口已闭合。
@@ -5071,3 +5071,35 @@
   - Frida 仍为 skipped；audit logs 为空且 `audit_events=[]`；无 hardware breakpoint evidence；Windows Rust PE 符号问题未修复。
 - 下一子任务建议：
   - 若目标提升到 90%，优先补真实 debugger detector audit event、硬件断点 Windows evidence、Windows Rust PE 修复与多 Windows 环境；不能用当前证据虚报 90%。
+
+## windows_detector_fixture_evidence_prep_20260506
+- 本轮清单：
+  - 为冲击 90% 概率补 Windows CI detector 正控证据路径，而不是扩大既有 protected PE 结论。
+  - 新增 Windows Debug API 正控 fixture：在 `CreateProcessW(DEBUG_PROCESS)` 下调用 `IsDebuggerPresent` / `CheckRemoteDebuggerPresent`，命中后通过 audit 子系统落盘 `debugger_detected`。
+  - 扩展既有 runtime env detector fixture，使 hardware breakpoint 与 Frida divergence 正控测试可接收外部 audit log 路径，并被 Windows external-live collector 收集为 `audit_only` check。
+  - CI workflow 增加构建 `windows_debugger_detector_fixture`、`env_detectors_hardware_breakpoint_cross_check`、`env_detectors_frida_divergence`，collector 增加 `--fixture-dir build-windows-live/tests`。
+  - 证据边界保持诚实：这些新增项只声明 fixture-level positive-control detector evidence，不声明 protected PE 自身已经触发 debugger / Frida / hardware-breakpoint detector。
+  - 脱敏 `STATUS.md` 中历史私人手机号记录；真实投稿包文件不在本轮 detector evidence 改动范围内。
+- 变更文件：
+  - `/workspace/vmp/.github/workflows/windows_live_evidence.yml`
+  - `/workspace/vmp/paper/scripts/validate_external_live.py`
+  - `/workspace/vmp/paper/schemas/external_live_matrix.schema.json`
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/tests/runtime_env_detectors/CMakeLists.txt`
+  - `/workspace/vmp/tests/runtime_env_detectors/test_common.h`
+  - `/workspace/vmp/tests/runtime_env_detectors/env_detectors_hardware_breakpoint_cross_check.cpp`
+  - `/workspace/vmp/tests/runtime_env_detectors/env_detectors_frida_divergence.cpp`
+  - `/workspace/vmp/tests/runtime_env_detectors/windows_debugger_detector_fixture.cpp`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - 干净树 MinGW probe：`windows_debugger_detector_fixture`、`env_detectors_hardware_breakpoint_cross_check`、`env_detectors_frida_divergence` 三个 Windows 目标构建通过。
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py tests/integration_targets/run_integration_ci.py`：通过。
+  - `.github/workflows/windows_live_evidence.yml` Ruby YAML 解析：通过。
+  - `git diff --check` 限定本轮相关文件：通过。
+  - 本轮相关文件 PAT/令牌关键字扫描：未发现 GitHub token；`STATUS.md` 历史手机号已脱敏。
+- 未完成项：
+  - 尚需提交并推送，触发下一轮 GitHub Windows CI。
+  - CI 成功后需下载 artifact，校验两个 target 报告中新增 fixture checks、audit logs 事件字符串、artifact sha256。
+  - 仍需单独做论文/PDF 与已发表论文版式对比，并按差距修改 PDF 源文件。
+- 下一子任务建议：
+  - 推送 detector fixture evidence commit，等待 Windows CI 完成并复核 artifact；若证据真实有效，再重新执行 5 agent × 3 round 审核。

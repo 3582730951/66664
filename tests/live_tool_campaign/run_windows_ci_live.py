@@ -193,6 +193,44 @@ def make_check(
     }
 
 
+def make_audit_event_check(
+    *,
+    check_id: str,
+    alias: str,
+    category: str,
+    tool: str,
+    command_summary: str,
+    ok: bool,
+    audit_text: str,
+    observed: str,
+    claim_scope: str,
+    non_claims: list[str],
+    limitations: list[str],
+    artifacts: list[dict[str, str]],
+) -> dict[str, Any]:
+    events = events_from_audit(audit_text)
+    return {
+        "id": check_id,
+        "display_alias": alias,
+        "category": category,
+        "tool": tool,
+        "command_summary": command_summary,
+        "ok": bool(ok),
+        "oracle_triggered": bool(events),
+        "output_policy": "audit_only",
+        "expected_result": None,
+        "observed_result": observed,
+        "output_correct": bool(ok),
+        "configured_reaction_observed": bool(ok and events),
+        "audit_events": events,
+        "audit_excerpt": audit_text[:2000],
+        "claim_scope": claim_scope,
+        "non_claims": non_claims,
+        "limitations": limitations,
+        "evidence_artifacts": artifacts,
+    }
+
+
 def collect_native_check(binary: Path, iterations: int, expected: str, raw_dir: Path, bundle_root: Path) -> dict[str, Any]:
     audit_path = raw_dir / "windows_native_audit.log"
     result = run_target(binary, iterations, audit_path)
@@ -491,6 +529,181 @@ def collect_frida_check(binary: Path, iterations: int, expected: str, raw_dir: P
     )
 
 
+def host_executable(path: Path) -> Path:
+    if path.exists():
+        return path
+    if sys.platform.startswith("win") and path.suffix.lower() != ".exe":
+        candidate = path.with_name(path.name + ".exe")
+        if candidate.exists():
+            return candidate
+    return path
+
+
+def fixture_path(fixture_dir: Path, name: str) -> Path:
+    path = host_executable(fixture_dir / name)
+    if not path.exists():
+        raise RuntimeError(f"missing detector fixture executable: {rel(path)}")
+    return path.resolve()
+
+
+def copy_fixture_binary(fixture: Path, raw_dir: Path) -> Path:
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    copied = raw_dir / fixture.name
+    shutil.copy2(fixture, copied)
+    return copied
+
+
+def collect_process_fixture_check(
+    *,
+    fixture_dir: Path,
+    fixture_name: str,
+    check_id: str,
+    alias: str,
+    category: str,
+    expected_event: str,
+    raw_dir: Path,
+    bundle_root: Path,
+    claim_scope: str,
+    non_claims: list[str],
+    limitations: list[str],
+) -> dict[str, Any]:
+    fixture = fixture_path(fixture_dir, fixture_name)
+    fixture_copy = copy_fixture_binary(fixture, raw_dir)
+    audit_path = raw_dir / f"{check_id}.audit.log"
+    stdout_log = raw_dir / f"{check_id}.stdout.log"
+    stderr_log = raw_dir / f"{check_id}.stderr.log"
+    proc = subprocess.run(
+        [str(fixture), str(audit_path)],
+        cwd=str(fixture.parent),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    write_text(stdout_log, proc.stdout)
+    write_text(stderr_log, proc.stderr)
+    ensure_text_file(audit_path)
+    audit_text = audit_path.read_text(encoding="utf-8", errors="ignore")
+    ok = proc.returncode == 0 and expected_event in audit_text
+    meta_log = raw_dir / f"{check_id}.meta.json"
+    write_text(meta_log, json.dumps({
+        "fixture": bundle_rel(fixture, bundle_root),
+        "exit_code": proc.returncode,
+        "expected_event": expected_event,
+        "event_present": expected_event in audit_text,
+    }, indent=2, sort_keys=True) + "\n")
+    return make_audit_event_check(
+        check_id=check_id,
+        alias=alias,
+        category=category,
+        tool=fixture_name,
+        command_summary=f"{fixture_name} <audit-log>",
+        ok=ok,
+        audit_text=audit_text,
+        observed=proc.stdout.strip().replace("\r\n", "\n").replace("\r", ""),
+        claim_scope=claim_scope,
+        non_claims=non_claims,
+        limitations=limitations,
+        artifacts=[
+            evidence_artifact(fixture_copy, "fixture-binary", bundle_root),
+            evidence_artifact(stdout_log, "stdout", bundle_root),
+            evidence_artifact(stderr_log, "stderr", bundle_root),
+            evidence_artifact(audit_path, "audit-log", bundle_root),
+            evidence_artifact(meta_log, "fixture-metadata", bundle_root),
+        ],
+    )
+
+
+def collect_debugger_detector_fixture_check(fixture_dir: Path, raw_dir: Path, bundle_root: Path) -> dict[str, Any]:
+    fixture = fixture_path(fixture_dir, "windows_debugger_detector_fixture")
+    fixture_copy = copy_fixture_binary(fixture, raw_dir)
+    check_id = "windows_debugger_detector_fixture"
+    audit_path = raw_dir / f"{check_id}.audit.log"
+    stdout_log = raw_dir / f"{check_id}.stdout.log"
+    stderr_log = raw_dir / f"{check_id}.stderr.log"
+    quoted = subprocess.list2cmdline([str(fixture), str(audit_path)])
+    cmd_line = f'cmd.exe /d /s /c "{quoted} > {subprocess.list2cmdline([str(stdout_log)])} 2> {subprocess.list2cmdline([str(stderr_log)])}"'
+    result = run_cmd_under_windows_debugger(cmd_line, audit_path, timeout_sec=60)
+    ensure_text_file(stdout_log)
+    ensure_text_file(stderr_log)
+    ensure_text_file(audit_path)
+    stdout_text = stdout_log.read_text(encoding="utf-8", errors="ignore")
+    audit_text = audit_path.read_text(encoding="utf-8", errors="ignore")
+    expected_event = "debugger_detected"
+    ok = result["exit_code"] == 0 and result["debug_events"] > 0 and expected_event in audit_text
+    meta_log = raw_dir / f"{check_id}.meta.json"
+    write_text(meta_log, json.dumps({
+        "fixture": bundle_rel(fixture, bundle_root),
+        "exit_code": result["exit_code"],
+        "debug_events": result["debug_events"],
+        "expected_event": expected_event,
+        "event_present": expected_event in audit_text,
+    }, indent=2, sort_keys=True) + "\n")
+    return make_audit_event_check(
+        check_id=check_id,
+        alias="Windows-Debugger-Detector-Fixture",
+        category="debugger",
+        tool="windows-debug-api-fixture",
+        command_summary="CreateProcessW(DEBUG_PROCESS) around windows_debugger_detector_fixture",
+        ok=ok,
+        audit_text=audit_text,
+        observed=stdout_text.strip().replace("\r\n", "\n").replace("\r", ""),
+        claim_scope="A Windows detector fixture emitted debugger_detected while launched under the Windows Debug API on the CI runner.",
+        non_claims=[
+            "This positive-control fixture does not claim that protected PE samples themselves emitted debugger_detected.",
+            "This does not cover hardware breakpoint register manipulation or external GUI debuggers.",
+        ],
+        limitations=["GitHub-hosted Windows runner only; fixture-level positive control."],
+        artifacts=[
+            evidence_artifact(fixture_copy, "fixture-binary", bundle_root),
+            evidence_artifact(stdout_log, "stdout", bundle_root),
+            evidence_artifact(stderr_log, "stderr", bundle_root),
+            evidence_artifact(audit_path, "audit-log", bundle_root),
+            evidence_artifact(meta_log, "fixture-metadata", bundle_root),
+        ],
+    )
+
+
+def collect_detector_fixture_checks(fixture_dir: Path | None, raw_dir: Path, bundle_root: Path) -> list[dict[str, Any]]:
+    if fixture_dir is None:
+        return []
+    fixture_dir = fixture_dir.resolve()
+    return [
+        collect_debugger_detector_fixture_check(fixture_dir, raw_dir, bundle_root),
+        collect_process_fixture_check(
+            fixture_dir=fixture_dir,
+            fixture_name="env_detectors_hardware_breakpoint_cross_check",
+            check_id="windows_hardware_breakpoint_detector_fixture",
+            alias="Windows-HWBP-Detector-Fixture",
+            category="hardware_breakpoint",
+            expected_event="hardware_breakpoint_detected",
+            raw_dir=raw_dir,
+            bundle_root=bundle_root,
+            claim_scope="The runtime env detector hardware-breakpoint positive-control fixture emitted hardware_breakpoint_detected on the Windows CI runner.",
+            non_claims=[
+                "This is a detector evaluator positive-control fixture, not proof that an external debugger set DR0-DR7 on a protected PE.",
+                "Protected PE native/debugapi checks remain separate and do not claim hardware-breakpoint coverage unless their audit_events include it.",
+            ],
+            limitations=["Fixture-level synthetic debug-register reading; GitHub-hosted Windows runner only."],
+        ),
+        collect_process_fixture_check(
+            fixture_dir=fixture_dir,
+            fixture_name="env_detectors_frida_divergence",
+            check_id="windows_frida_detector_fixture",
+            alias="Windows-Frida-Detector-Fixture",
+            category="frida",
+            expected_event="frida_injection_detected",
+            raw_dir=raw_dir,
+            bundle_root=bundle_root,
+            claim_scope="The runtime env detector Frida positive-control fixture emitted frida_injection_detected on the Windows CI runner.",
+            non_claims=[
+                "This is a detector evaluator positive-control fixture, not a successful live Frida attach to a protected PE.",
+                "The separate windows_frida_attach check remains skipped unless Frida attaches successfully.",
+            ],
+            limitations=["Fixture-level synthetic maps/TLS disagreement; GitHub-hosted Windows runner only."],
+        ),
+    ]
+
+
 def command_version(cmd: list[str]) -> str | None:
     try:
         proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=10)
@@ -527,6 +740,7 @@ def main() -> int:
     parser.add_argument("--default-test", choices=["target_c", "target_cpp", "target_rust"], default="target_c",
                         help="integration target to auto-discover when --binary is not supplied")
     parser.add_argument("--binary", type=Path, help="protected PE to run; defaults to --default-test protected PE from integration artifacts")
+    parser.add_argument("--fixture-dir", type=Path, help="directory containing Windows detector fixture executables")
     parser.add_argument("--iterations", type=int, default=100_000)
     parser.add_argument("--output", type=Path, default=DEFAULT_REPORT_DIR / f"external_live_matrix_windows_{stamp()}.json")
     parser.add_argument("--frida", action="store_true", help="attempt optional Frida attach evidence if frida is installed")
@@ -542,6 +756,9 @@ def main() -> int:
         raise SystemExit(f"missing protected PE: {rel(binary)}")
     if args.iterations <= 0:
         raise SystemExit("--iterations must be positive")
+    fixture_dir = None
+    if args.fixture_dir is not None:
+        fixture_dir = args.fixture_dir if args.fixture_dir.is_absolute() else (ROOT / args.fixture_dir)
 
     test_name = binary.parent.name
     expected = target_expected(binary, args.iterations)
@@ -554,6 +771,7 @@ def main() -> int:
     if not native["ok"]:
         raise SystemExit("Windows native execution check failed; not writing claim-bearing evidence report")
     checks.append(native)
+    checks.extend(collect_detector_fixture_checks(fixture_dir, raw_dir, bundle_root))
 
     optional_collectors = [("windows_debugapi_launch", collect_debugger_check)]
     if args.frida:

@@ -25,7 +25,7 @@ ABSOLUTE_PATH_RE = re.compile(r"(^|\s)/(?:home|Users|private|tmp|var|workspace|r
 UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 ID_RE = re.compile(r"^[a-z0-9_.-]+$")
-ALLOWED_CATEGORIES = {"frida", "ptrace", "dbi", "emulator", "debugger", "mapping_integrity", "platform"}
+ALLOWED_CATEGORIES = {"frida", "ptrace", "dbi", "emulator", "debugger", "hardware_breakpoint", "mapping_integrity", "platform"}
 ALLOWED_POLICIES = {"preserve_expected_output", "configured_reaction_path", "audit_only"}
 
 
