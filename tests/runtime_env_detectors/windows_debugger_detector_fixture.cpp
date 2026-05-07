@@ -35,5 +35,7 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "windows_debugger_detector_fixture detected=" << (detected ? "true" : "false") << "\n";
-  return detected ? 0 : 3;
+  std::cout.flush();
+  std::cerr.flush();
+  ExitProcess(detected ? 0u : 3u);
 }

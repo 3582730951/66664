@@ -5139,3 +5139,19 @@
   - 仍缺少 Tigress/主流 protector 同负载 baseline；已在论文限制中诚实承认。
 - 下一子任务建议：
   - 提交并推送 Windows debugger fixture 直启修复与 SQLite/PDF 响应材料，等待新 Windows CI；若成功再下载 artifact 核验 detector fixture audit events，并重新进行 5 agent × 3 round 审核。
+
+## windows_debugger_fixture_exitprocess_fix_20260506
+- 本轮清单：
+  - 新推送 commit `3c33da0` 后触发 Windows-live run `25437284839`，仍在 `windows_debugger_detector_fixture` 超时失败。
+  - 失败原因进一步收窄：不是 `cmd.exe` 重定向包装，而是 MinGW fixture 在 Debug API 下没有让 root process 在 60 秒内结束。
+  - 修改 fixture：audit 落盘并 flush stdout/stderr 后直接调用 Windows `ExitProcess(detected ? 0 : 3)`，避免 C++ runtime/析构路径在被调试状态下拖住进程。
+- 变更文件：
+  - `/workspace/vmp/tests/runtime_env_detectors/windows_debugger_detector_fixture.cpp`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - 干净树 MinGW probe 构建 `windows_debugger_detector_fixture.exe`：通过。
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/run_sqlite_case_study.py`：通过。
+- 未完成项：
+  - 尚需提交推送 `ExitProcess` 修复并重跑 Windows-live；run `25437284839` 不能作为证据。
+- 下一子任务建议：
+  - 推送后继续观察 Windows-live；如果仍超时，应把 debugger detector fixture 降为 non-fatal skipped，并先用 hardware/frida fixture 正控证据推进，避免整条 Windows evidence 被一个不稳定 Debug API fixture 阻断。
