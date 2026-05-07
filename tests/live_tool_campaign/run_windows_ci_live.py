@@ -662,45 +662,66 @@ def collect_debugger_detector_fixture_check(fixture_dir: Path, raw_dir: Path, bu
     )
 
 
-def collect_detector_fixture_checks(fixture_dir: Path | None, raw_dir: Path, bundle_root: Path) -> list[dict[str, Any]]:
+def collect_detector_fixture_checks(
+    fixture_dir: Path | None,
+    raw_dir: Path,
+    bundle_root: Path,
+    skipped: list[dict[str, str]],
+) -> list[dict[str, Any]]:
     if fixture_dir is None:
         return []
     fixture_dir = fixture_dir.resolve()
-    return [
-        collect_debugger_detector_fixture_check(fixture_dir, raw_dir, bundle_root),
-        collect_process_fixture_check(
-            fixture_dir=fixture_dir,
-            fixture_name="env_detectors_hardware_breakpoint_cross_check",
-            check_id="windows_hardware_breakpoint_detector_fixture",
-            alias="Windows-HWBP-Detector-Fixture",
-            category="hardware_breakpoint",
-            expected_event="hardware_breakpoint_detected",
-            raw_dir=raw_dir,
-            bundle_root=bundle_root,
-            claim_scope="The runtime env detector hardware-breakpoint positive-control fixture emitted hardware_breakpoint_detected on the Windows CI runner.",
-            non_claims=[
-                "This is a detector evaluator positive-control fixture, not proof that an external debugger set DR0-DR7 on a protected PE.",
-                "Protected PE native/debugapi checks remain separate and do not claim hardware-breakpoint coverage unless their audit_events include it.",
-            ],
-            limitations=["Fixture-level synthetic debug-register reading; GitHub-hosted Windows runner only."],
+    checks: list[dict[str, Any]] = []
+    fixture_collectors = [
+        (
+            "windows_debugger_detector_fixture",
+            lambda: collect_debugger_detector_fixture_check(fixture_dir, raw_dir, bundle_root),
         ),
-        collect_process_fixture_check(
-            fixture_dir=fixture_dir,
-            fixture_name="env_detectors_frida_divergence",
-            check_id="windows_frida_detector_fixture",
-            alias="Windows-Frida-Detector-Fixture",
-            category="frida",
-            expected_event="frida_injection_detected",
-            raw_dir=raw_dir,
-            bundle_root=bundle_root,
-            claim_scope="The runtime env detector Frida positive-control fixture emitted frida_injection_detected on the Windows CI runner.",
-            non_claims=[
-                "This is a detector evaluator positive-control fixture, not a successful live Frida attach to a protected PE.",
-                "The separate windows_frida_attach check remains skipped unless Frida attaches successfully.",
-            ],
-            limitations=["Fixture-level synthetic maps/TLS disagreement; GitHub-hosted Windows runner only."],
+        (
+            "windows_hardware_breakpoint_detector_fixture",
+            lambda: collect_process_fixture_check(
+                fixture_dir=fixture_dir,
+                fixture_name="env_detectors_hardware_breakpoint_cross_check",
+                check_id="windows_hardware_breakpoint_detector_fixture",
+                alias="Windows-HWBP-Detector-Fixture",
+                category="hardware_breakpoint",
+                expected_event="hardware_breakpoint_detected",
+                raw_dir=raw_dir,
+                bundle_root=bundle_root,
+                claim_scope="The runtime env detector hardware-breakpoint positive-control fixture emitted hardware_breakpoint_detected on the Windows CI runner.",
+                non_claims=[
+                    "This is a detector evaluator positive-control fixture, not proof that an external debugger set DR0-DR7 on a protected PE.",
+                    "Protected PE native/debugapi checks remain separate and do not claim hardware-breakpoint coverage unless their audit_events include it.",
+                ],
+                limitations=["Fixture-level synthetic debug-register reading; GitHub-hosted Windows runner only."],
+            ),
+        ),
+        (
+            "windows_frida_detector_fixture",
+            lambda: collect_process_fixture_check(
+                fixture_dir=fixture_dir,
+                fixture_name="env_detectors_frida_divergence",
+                check_id="windows_frida_detector_fixture",
+                alias="Windows-Frida-Detector-Fixture",
+                category="frida",
+                expected_event="frida_injection_detected",
+                raw_dir=raw_dir,
+                bundle_root=bundle_root,
+                claim_scope="The runtime env detector Frida positive-control fixture emitted frida_injection_detected on the Windows CI runner.",
+                non_claims=[
+                    "This is a detector evaluator positive-control fixture, not a successful live Frida attach to a protected PE.",
+                    "The separate windows_frida_attach check remains skipped unless Frida attaches successfully.",
+                ],
+                limitations=["Fixture-level synthetic maps/TLS disagreement; GitHub-hosted Windows runner only."],
+            ),
         ),
     ]
+    for check_id, collector in fixture_collectors:
+        try:
+            checks.append(collector())
+        except Exception as exc:
+            skipped.append({"id": check_id, "reason": f"detector fixture did not produce positive evidence: {redact(exc)}"})
+    return checks
 
 
 def command_version(cmd: list[str]) -> str | None:
@@ -770,7 +791,7 @@ def main() -> int:
     if not native["ok"]:
         raise SystemExit("Windows native execution check failed; not writing claim-bearing evidence report")
     checks.append(native)
-    checks.extend(collect_detector_fixture_checks(fixture_dir, raw_dir, bundle_root))
+    checks.extend(collect_detector_fixture_checks(fixture_dir, raw_dir, bundle_root, skipped))
 
     optional_collectors = [("windows_debugapi_launch", collect_debugger_check)]
     if args.frida:

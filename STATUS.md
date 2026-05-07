@@ -5155,3 +5155,19 @@
   - 尚需提交推送 `ExitProcess` 修复并重跑 Windows-live；run `25437284839` 不能作为证据。
 - 下一子任务建议：
   - 推送后继续观察 Windows-live；如果仍超时，应把 debugger detector fixture 降为 non-fatal skipped，并先用 hardware/frida fixture 正控证据推进，避免整条 Windows evidence 被一个不稳定 Debug API fixture 阻断。
+
+## windows_detector_fixture_nonfatal_skip_20260507
+- 本轮清单：
+  - 推送 commit `bf93473` 后触发 Windows-live run `25477401390`，`windows_debugger_detector_fixture` 仍在 Debug API loop 中 60 秒超时。
+  - 判定：该 debugger fixture 在 GitHub Windows runner 上不稳定，不能继续作为整份 Windows evidence 的阻断项。
+  - 修改 external-live collector：三个 detector fixture 独立执行；单个 fixture 未产生正证据时写入 `skipped_checks`，不阻断其他 fixture。
+  - 预期诚实边界：若 debugger fixture 继续失败，则只能声明 hardware-breakpoint/frida detector evaluator 正控 evidence；不能声明 Windows debugger detector fixture 正控 evidence。
+- 变更文件：
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - 尚未提交推送。
+- 未完成项：
+  - 需要提交推送并重跑 Windows-live；成功后下载 artifact 验证 `windows_hardware_breakpoint_detector_fixture` 与 `windows_frida_detector_fixture` 的 audit events。
+- 下一子任务建议：
+  - 推送 nonfatal skip 修复；若 Windows-live 成功，用 artifact 重新估算通过概率。若仍失败，继续按日志修复真实阻断项。
