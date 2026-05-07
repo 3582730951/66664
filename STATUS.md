@@ -5231,3 +5231,116 @@
 - 下一子任务建议：
   - 若目标仍是冲击 90%，优先补三类真实强证据：把 GitHub run id / commit / workflow URL 写入 external-live JSON manifest；在 protected PE 上完成 live Frida attach 或外部硬件断点触发证据；合法获取并运行 Tigress 或明确可复现的同负载开源 protector baseline。
   - 维持当前真实评估口径：验收标准“5 agents x 3 rounds 同结论且不低于 80%”已经满足；“90%”当前不满足，不能诚实声明。
+
+## windows_external_live_ci_provenance_20260507
+- 本轮清单：
+  - 修复 5-agent 审核中 Agent 2 指出的 provenance 扣分点：Windows external-live JSON 现在可内嵌 GitHub Actions run id、attempt、repository、head SHA、branch、workflow ref、run URL、workflow URL。
+  - 新增 schema/validator 对 `ci_provenance` 的格式校验；本地离线报告不强制要求该字段，保持向后兼容。
+  - 推送 commit `15ba50d Embed CI provenance in Windows live evidence`。
+  - GitHub Actions Windows-live run `25479114334` 成功，artifact `6848160142` 下载至 `/tmp/windows-live-evidence-25479114334`。
+  - 新 artifact 的 `target_c` 与 `target_cpp` 两个 external-live JSON 均包含：
+    - `run_id=25479114334`
+    - `head_sha=15ba50d43020af61a02924b26ee53becd5369306`
+    - `run_url=https://github.com/3582730951/66664/actions/runs/25479114334`
+    - `workflow_url=https://github.com/3582730951/66664/actions/workflows/windows_live_evidence.yml`
+  - 正证据保持不变：native execution、Debug API launch、debugger detector fixture、hardware-breakpoint detector fixture、Frida detector fixture 均为 `ok=true`；`windows_frida_attach` 仍为 skipped。
+- 变更文件：
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/paper/scripts/validate_external_live.py`
+  - `/workspace/vmp/paper/schemas/external_live_matrix.schema.json`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py`：通过。
+  - `python3 -m json.tool paper/schemas/external_live_matrix.schema.json`：通过。
+  - 旧 artifact `/tmp/windows-live-evidence-25478563985` 在无 `ci_provenance` 字段时仍通过 validator。
+  - 手工注入 `ci_provenance` 的临时样例通过 validator。
+  - GitHub Actions Windows-live run `25479114334`：completed success。
+  - `python3 paper/scripts/validate_external_live.py --bundle-root /tmp/windows-live-evidence-25479114334 /tmp/windows-live-evidence-25479114334/external_live_matrix_windows_target_c_25479114334.json /tmp/windows-live-evidence-25479114334/external_live_matrix_windows_target_cpp_25479114334.json`：通过。
+  - 新 artifact 中三个 fixture import table 仍仅含 `KERNEL32.dll` 与 `msvcrt.dll`。
+- 未完成项：
+  - Provenance 增强提升可追溯性，但不补齐 90% 所需核心证据；`windows_frida_attach` 仍 skipped。
+  - 仍缺 protected PE live Frida attach / 外部硬件断点触发证据。
+  - 仍缺 Tigress / commercial protector same-workload baseline。
+  - 仍缺大型真实应用/服务级 case study。
+- 下一子任务建议：
+  - 若继续冲击 90%，下一步应优先做 protected PE live Frida attach 的真实实验；若 GitHub runner 仍因 `VirtualAllocEx`/进程退出过快失败，则需要增加一个专门的长运行 protected PE harness，而不是把 fixture 证据冒充为 live attach。
+
+## final_5agent_review_after_provenance_20260507
+- 本轮清单：
+  - 对最终状态重新执行 5-agent x 3-round 复审，避免混用 commit `70da544` 的旧结论。
+  - 最终被审状态：
+    - commit `15ba50d Embed CI provenance in Windows live evidence`
+    - Windows-live run `25479114334`：completed success
+    - artifact `/tmp/windows-live-evidence-25479114334`
+    - 两份 external-live JSON 均通过 `validate_external_live.py --bundle-root`
+    - 两份 JSON 均内嵌 `ci_provenance`，含 `run_id=25479114334`、`head_sha=15ba50d43020af61a02924b26ee53becd5369306`、run URL、workflow URL
+  - 最终 evidence 口径：
+    - 支撑 Windows C/C++ protected PE native execution 与 Debug API launch survival。
+    - 支撑 debugger / hardware-breakpoint / Frida detector positive-control fixture audit events。
+    - 不支撑 protected PE live Frida attach；`windows_frida_attach` 仍为 skipped。
+    - 不支撑 Tigress / commercial protector same-workload comparison。
+- 变更文件：
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - Agent A：3 轮 `87%/87%/88%`，通过，不支持 90%。
+  - Agent B：3 轮 `84%/85%/87%`，通过，不支持 90%。
+  - Agent C：3 轮 `84%/84%/87%`，通过，不支持 90%。
+  - Agent D：3 轮 `85%-86%/85%-86%/86%-87%`，通过，不支持 90%。
+  - Agent E：3 轮 `85%/86%/87%`，通过，不支持 90%。
+  - 5 agent x 3 rounds 全部同结论：通过概率不低于 80%；没有 agent 认为可诚实声称 90%。
+- 未完成项：
+  - 90% 仍不满足；主要 blocker 未变：protected PE live Frida attach skipped、detector evidence 仍是 positive-control fixture、缺 Tigress/commercial same-workload baseline、缺大型真实应用/服务级 case study。
+- 下一子任务建议：
+  - 停止把当前材料宣传为 90%；当前可诚实汇报为“最终复审满足 ≥80% 验收，真实区间约 84%-88%”。
+  - 若继续做实验，优先实现长运行 protected PE harness 以提高 live Frida attach 成功率，并将结果作为新的 external-live check；其次处理 Tigress/合法开源 protector baseline。
+
+## jss_experiment_manual_and_server_case_20260507
+- 本轮清单：
+  - 根据 owner 新反馈，明确人类评估由 owner 执行，本轮补非人类评估材料。
+  - 新增中文实验手册 `/workspace/vmp/docs/EXPERIMENT_MANUAL_ZH.md`，覆盖：
+    - artifact 一键复现；
+    - server-scale case study；
+    - SQLite component case；
+    - Tigress / 合法开源 protector 同负载 baseline protocol；
+    - Linux external live campaign；
+    - Windows CI / Windows 真机 live Frida evidence protocol；
+    - Android runner proof / Android 真机 Frida evidence protocol；
+    - external-live JSON 记录和 validator 要求；
+    - supplementary 打包检查；
+    - 可写入论文的中文/英文口径；
+    - 90% 前必须补齐的证据。
+  - 新增 server-scale case 脚本 `/workspace/vmp/paper/scripts/run_server_case_study.py`：生成单进程 loopback HTTP server，保护 `protected_route_score`，通过真实 TCP 请求测吞吐和延迟分布。
+  - 修复 server case smoke 中的两个真实问题：
+    - readiness probe 占用一次 TCP accept，导致最后一个正式客户端 reset；已将 server request limit 调整为 `requests + 1`。
+    - 并发 accept 顺序导致 oracle 依赖 `handled` 计数而不稳定；已将 response/aggregate 改为只依赖请求路径 multiset。
+  - 生成正式 server report `/workspace/vmp/reports/server_case_study_20260507.json`。
+- 变更文件：
+  - `/workspace/vmp/docs/EXPERIMENT_MANUAL_ZH.md`
+  - `/workspace/vmp/paper/scripts/run_server_case_study.py`
+  - `/workspace/vmp/reports/server_case_study_20260507.json`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - `python3 -m py_compile paper/scripts/run_server_case_study.py`：通过。
+  - `python3 paper/scripts/run_server_case_study.py --runs 5 --requests 64 --concurrency 8 --raw-dir reports/server_case_study_smoke_20260507 --output reports/server_case_study_smoke_20260507.json`：最终通过，`ok=true`。
+  - `python3 paper/scripts/run_server_case_study.py --runs 20 --requests 400 --concurrency 16 --raw-dir reports/server_case_study_20260507 --output reports/server_case_study_20260507.json`：通过。
+  - Server case 正式结果：
+    - `all_correct=true`
+    - `protected_symbol=protected_route_score`
+    - `runs_per_variant=20`
+    - `requests_per_run=400`
+    - `concurrency=16`
+    - `throughput_ratio_protected_over_baseline=1.0076`
+    - `median_latency_ratio_protected_over_baseline=1.0062`
+    - baseline median throughput `1662.8639 rps`
+    - protected median throughput `1675.5066 rps`
+    - baseline per-run median latency `8.918 ms`
+    - protected per-run median latency `8.9737 ms`
+  - `python3 -m json.tool reports/server_case_study_20260507.json`：通过。
+  - 本轮相关文件敏感信息扫描：未发现 PAT 或私人手机号。
+- 未完成项：
+  - Server case 是 loopback single-process sanity check，不是 production multi-process service。
+  - Tigress / commercial protector 同负载 baseline 仍未实际执行；手册中只给合法执行 protocol 和 skipped 规则。
+  - Windows/Android 真机 live Frida evidence 仍未实际补齐；手册中给执行 protocol。
+  - 人类评估未执行，按 owner 指示留给 owner。
+- 下一子任务建议：
+  - 如果要进一步提升到 90%，先按手册执行 protected PE live Frida attach 或 Tigress/legal baseline；执行后把新 report 纳入 validator，再重新跑 5-agent x 3-round 审核。

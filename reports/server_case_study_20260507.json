@@ -1,0 +1,75 @@
+{
+  "all_correct": true,
+  "artifacts": {
+    "baseline": "reports/server_case_study_20260507/server_case",
+    "baseline_runs": "reports/server_case_study_20260507/baseline_runs.json",
+    "policy": "reports/server_case_study_20260507/policy.json",
+    "protected": "reports/server_case_study_20260507/server_case.protected",
+    "protected_runs": "reports/server_case_study_20260507/protected_runs.json",
+    "raw_dir": "reports/server_case_study_20260507",
+    "source": "reports/server_case_study_20260507/server_case.c"
+  },
+  "baseline": {
+    "per_run_median_latency": {
+      "max_ms": 9.778,
+      "median_ms": 8.918,
+      "min_ms": 8.1283,
+      "p95_ms": 9.6464
+    },
+    "per_run_p95_latency": {
+      "max_ms": 14.3425,
+      "median_ms": 12.9915,
+      "min_ms": 11.6522,
+      "p95_ms": 14.1291
+    },
+    "throughput": {
+      "max_rps": 1820.0074,
+      "median_rps": 1662.8639,
+      "min_rps": 1536.2832,
+      "p95_rps": 1791.871
+    }
+  },
+  "claim_scope": "Server-scale loopback HTTP case study: a single-process server with protected request classification, measured via real TCP requests.",
+  "concurrency": 16,
+  "fabricated_data": false,
+  "generated_utc": "2026-05-07T06:34:16Z",
+  "median_latency_ratio_protected_over_baseline": 1.0062,
+  "non_claims": [
+    "Not a production multi-process deployment or internet-facing service benchmark.",
+    "Not a live attacker campaign against the server.",
+    "Not a replacement for a mainstream protector same-workload baseline."
+  ],
+  "platform": "x86_64-linux",
+  "protected": {
+    "per_run_median_latency": {
+      "max_ms": 9.8363,
+      "median_ms": 8.9737,
+      "min_ms": 8.5459,
+      "p95_ms": 9.8119
+    },
+    "per_run_p95_latency": {
+      "max_ms": 14.8049,
+      "median_ms": 12.8784,
+      "min_ms": 12.0679,
+      "p95_ms": 14.3139
+    },
+    "throughput": {
+      "max_rps": 1752.7233,
+      "median_rps": 1675.5066,
+      "min_rps": 1506.453,
+      "p95_rps": 1737.3849
+    }
+  },
+  "protected_symbol": "protected_route_score",
+  "requests_per_run": 400,
+  "runs_per_variant": 20,
+  "schema": "pavmp.server_case_study.v1",
+  "sha256": {
+    "baseline": "4fe6bda9082fd29d00957d0b1b8b79788a5b1460457bfe52917d3a4b00f1a84c",
+    "policy": "a0ca66f8013df016297f63f629db4efe4c137afeae4372821b8cdab454b5f0fc",
+    "protected": "3b5ff1a652ef9032d3e32ac84bc31336fa292aa58b34214e7f2493cfd67efaff",
+    "source": "980aeefc64d7d84039d487f84d422cb439244fd9516580233fa3a59d004f1e50"
+  },
+  "system": "single-process loopback HTTP server",
+  "throughput_ratio_protected_over_baseline": 1.0076
+}
