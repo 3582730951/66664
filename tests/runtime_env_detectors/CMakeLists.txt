@@ -1,3 +1,9 @@
+function(vmp_static_link_windows_fixture target)
+  if(WIN32 AND MINGW)
+    target_link_options(${target} PRIVATE -static -static-libgcc -static-libstdc++)
+  endif()
+endfunction()
+
 function(vmp_add_runtime_env_detectors_test target source)
   add_executable(${target} ${source})
   target_link_libraries(${target} PRIVATE
@@ -6,6 +12,7 @@ function(vmp_add_runtime_env_detectors_test target source)
     vmp_runtime_trusted_oracle
     vmp_runtime_strings
     vmp_runtime_audit)
+  vmp_static_link_windows_fixture(${target})
   set_target_properties(${target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
   add_test(NAME ${target} COMMAND $<TARGET_FILE:${target}>)
   set_tests_properties(${target} PROPERTIES PASS_REGULAR_EXPRESSION "${target} OK")
@@ -28,5 +35,6 @@ if(WIN32)
     ${CMAKE_CURRENT_SOURCE_DIR}/windows_debugger_detector_fixture.cpp)
   target_link_libraries(windows_debugger_detector_fixture PRIVATE
     vmp_runtime_audit)
+  vmp_static_link_windows_fixture(windows_debugger_detector_fixture)
   set_target_properties(windows_debugger_detector_fixture PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 endif()
