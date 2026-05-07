@@ -5171,3 +5171,18 @@
   - 需要提交推送并重跑 Windows-live；成功后下载 artifact 验证 `windows_hardware_breakpoint_detector_fixture` 与 `windows_frida_detector_fixture` 的 audit events。
 - 下一子任务建议：
   - 推送 nonfatal skip 修复；若 Windows-live 成功，用 artifact 重新估算通过概率。若仍失败，继续按日志修复真实阻断项。
+
+## windows_detector_fixture_positive_only_20260507
+- 本轮清单：
+  - 推送 commit `90bbf1d` 后触发 Windows-live run `25477647084`，collector 已能跳过 debugger fixture 超时并继续生成两个 JSON。
+  - 该 run 仍失败，因为某个 detector fixture 返回 `ok=false` 但仍被放进 claim-bearing `checks`，导致 report 顶层 `ok=false`。
+  - 修改 collector：detector fixture 只有 `ok=true` 才进入 `checks`；非正证据统一写入 `skipped_checks`，不伪装为 evidence。
+- 变更文件：
+  - `/workspace/vmp/tests/live_tool_campaign/run_windows_ci_live.py`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - 尚未提交推送。
+- 未完成项：
+  - 需要提交推送并重跑 Windows-live；预计至少保留 native + protected Debug API launch survival，若 hardware/frida fixture 为 `ok=true` 则纳入正控证据，否则诚实 skipped。
+- 下一子任务建议：
+  - 推送后验证 artifact。若最终没有任何 detector fixture 正控通过，则不能声称概率冲到 90%，只能保留 SQLite/PDF/边界改进带来的论文层面提升。

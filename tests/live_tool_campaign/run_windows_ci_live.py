@@ -718,7 +718,11 @@ def collect_detector_fixture_checks(
     ]
     for check_id, collector in fixture_collectors:
         try:
-            checks.append(collector())
+            check = collector()
+            if check.get("ok") is True:
+                checks.append(check)
+            else:
+                skipped.append({"id": check_id, "reason": "detector fixture ran but did not meet positive-evidence criteria"})
         except Exception as exc:
             skipped.append({"id": check_id, "reason": f"detector fixture did not produce positive evidence: {redact(exc)}"})
     return checks
