@@ -5186,3 +5186,48 @@
   - 需要提交推送并重跑 Windows-live；预计至少保留 native + protected Debug API launch survival，若 hardware/frida fixture 为 `ok=true` 则纳入正控证据，否则诚实 skipped。
 - 下一子任务建议：
   - 推送后验证 artifact。若最终没有任何 detector fixture 正控通过，则不能声称概率冲到 90%，只能保留 SQLite/PDF/边界改进带来的论文层面提升。
+
+## windows_detector_fixture_static_link_and_5agent_review_20260507
+- 本轮清单：
+  - 核验 Windows-live run `25477952444`：GitHub Actions 第 2 次 attempt 成功，artifact `6847808180` 下载至 `/tmp/windows-live-evidence-25477952444` 并通过 external-live validator。
+  - 真实结论：run `25477952444` 只支撑 Windows native execution 与 protected PE Debug API launch survival；debugger / hardware-breakpoint / Frida detector fixtures 因 `0xC0000139` 或超时被写入 `skipped_checks`，不能计入 detector 正证据。
+  - 定位 `0xC0000139` 原因：MinGW detector fixtures 动态依赖 `libstdc++-6.dll`、`libgcc_s_seh-1.dll`、`libwinpthread-1.dll`，而 Windows `pwsh` 采集阶段未稳定提供匹配运行时。
+  - 修改并推送 commit `70da544 Static link Windows detector fixtures`：Windows/Mingw 下 detector fixtures 使用 `-static -static-libgcc -static-libstdc++` 链接。
+  - 新 Windows-live run `25478563985` 成功，artifact `6847974368` 下载至 `/tmp/windows-live-evidence-25478563985`。
+  - 本地核验 `/tmp/windows-live-evidence-25478563985`：`target_c` 与 `target_cpp` 两个 external-live JSON 均 `ok=true`，且 `validate_external_live.py --bundle-root` 通过。
+  - 新正证据范围：
+    - `windows_native_execution`：protected PE 在 Windows runner 原生执行且输出正确。
+    - `windows_debugapi_launch`：protected PE 在 Windows Debug API launch 下执行且输出正确。
+    - `windows_debugger_detector_fixture`：正控 fixture 产生 `debugger_detected` audit event。
+    - `windows_hardware_breakpoint_detector_fixture`：正控 fixture 产生 `hardware_breakpoint_detected` audit event。
+    - `windows_frida_detector_fixture`：正控 fixture 产生 `frida_injection_detected` audit event。
+  - 诚实边界：`windows_frida_attach` 仍为 `skipped_checks`；不得声明 protected PE 的 live Frida attach 证据已经通过。
+  - 本地交叉验证静态链接：三个 fixture import table 仅含 `KERNEL32.dll` 与 `msvcrt.dll`，不再导入 MSYS2 C++ runtime DLL。
+  - 运行 5 个评审 agent，每个 agent 按固定评分表执行 3 轮审核：Evidence authenticity 25、Scope honesty 20、Reproducibility 20、CI correctness 15、Residual risk 20。
+  - 5 agent x 3 rounds 结果全部同结论：均为“通过概率不低于 80%，但没有真实依据支持 90%”。
+- 变更文件：
+  - `/workspace/vmp/tests/runtime_env_detectors/CMakeLists.txt`
+  - `/workspace/vmp/STATUS.md`
+- 验证结果：
+  - `cmake -S . -B build-windows-detector-static ... -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=AMD64 ...`：通过。
+  - `cmake --build build-windows-detector-static --target windows_debugger_detector_fixture env_detectors_hardware_breakpoint_cross_check env_detectors_frida_divergence -j`：通过。
+  - `x86_64-w64-mingw32-objdump -p build-windows-detector-static/tests/*.exe`：三个 fixture 仅导入 `KERNEL32.dll` 与 `msvcrt.dll`。
+  - `python3 -m py_compile tests/live_tool_campaign/run_windows_ci_live.py paper/scripts/validate_external_live.py paper/scripts/run_sqlite_case_study.py`：通过。
+  - GitHub Actions Windows-live run `25478563985`：completed success。
+  - `python3 paper/scripts/validate_external_live.py --bundle-root /tmp/windows-live-evidence-25478563985 /tmp/windows-live-evidence-25478563985/external_live_matrix_windows_target_c_25478563985.json /tmp/windows-live-evidence-25478563985/external_live_matrix_windows_target_cpp_25478563985.json`：通过。
+  - SQLite case study 仍为真实组件级证据：`/workspace/vmp/reports/sqlite_case_study_20260506.json`，`all_correct=true`，`protected_symbol=sqlite3_step`，`runs_per_variant=40`，`overhead_ratio=1.01`。
+  - 5-agent review：
+    - Agent 1：3 轮 `84%/85%/86%`，通过，不支持 90%。
+    - Agent 2：3 轮 `82%/84%/85%`，通过，不支持 90%。
+    - Agent 3：3 轮 `86%/86%/87%`，通过，不支持 90%。
+    - Agent 4：3 轮 `80%/81%/82%`，通过但边缘，不支持 90%。
+    - Agent 5：3 轮 `84%/84%/86%`，通过，不支持 90%。
+- 未完成项：
+  - 缺少 protected PE 的 live Frida attach 通过证据；当前 Frida 只支撑 detector positive-control fixture。
+  - 缺少真实外部硬件断点设置到 protected PE 后的 live trigger 证据；当前 hardware-breakpoint 只支撑 detector positive-control fixture。
+  - 缺少 Tigress / commercial protector same-workload baseline；Tigress 官方下载需要填写身份/机构/邮箱和许可证流程，未伪造信息下载。
+  - SQLite case study 仍是组件级 harness，不是大型 DBMS/browser/service 级 case study。
+  - Windows external-live JSON 未内嵌 run id / commit / workflow URL，当前通过 artifact 文件名、GitHub run、HEAD commit 关联证据；可进一步增强 provenance。
+- 下一子任务建议：
+  - 若目标仍是冲击 90%，优先补三类真实强证据：把 GitHub run id / commit / workflow URL 写入 external-live JSON manifest；在 protected PE 上完成 live Frida attach 或外部硬件断点触发证据；合法获取并运行 Tigress 或明确可复现的同负载开源 protector baseline。
+  - 维持当前真实评估口径：验收标准“5 agents x 3 rounds 同结论且不低于 80%”已经满足；“90%”当前不满足，不能诚实声明。

@@ -757,6 +757,35 @@ def runner_metadata(include_frida: bool) -> dict[str, Any]:
     }
 
 
+def ci_provenance() -> dict[str, str] | None:
+    run_id = os.environ.get("GITHUB_RUN_ID")
+    head_sha = os.environ.get("GITHUB_SHA")
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    if not (run_id or head_sha or repository):
+        return None
+
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    workflow_ref = os.environ.get("GITHUB_WORKFLOW_REF", "")
+    workflow_file = workflow_ref.split("@", 1)[0].split("/", 2)[2] if "/" in workflow_ref else ""
+    workflow_path = Path(workflow_file).name if workflow_file else ""
+    provenance = {
+        "provider": "github-actions",
+        "repository": repository or "unknown",
+        "run_id": run_id or "unknown",
+        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "unknown"),
+        "workflow": os.environ.get("GITHUB_WORKFLOW", "unknown"),
+        "workflow_ref": workflow_ref or "unknown",
+        "head_sha": head_sha or "unknown",
+        "head_branch": os.environ.get("GITHUB_REF_NAME", "unknown"),
+        "event_name": os.environ.get("GITHUB_EVENT_NAME", "unknown"),
+    }
+    if repository and run_id:
+        provenance["run_url"] = f"{server_url}/{repository}/actions/runs/{run_id}"
+    if repository and workflow_path:
+        provenance["workflow_url"] = f"{server_url}/{repository}/actions/workflows/{workflow_path}"
+    return provenance
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect Windows CI live evidence JSON")
     parser.add_argument("--report-dir", type=Path, default=DEFAULT_REPORT_DIR)
@@ -829,6 +858,9 @@ def main() -> int:
             "Detector coverage is claimed only for audit events present in each check's audit_events field.",
         ],
     }
+    provenance = ci_provenance()
+    if provenance is not None:
+        report["ci_provenance"] = provenance
     if skipped:
         report["skipped_checks"] = skipped
 

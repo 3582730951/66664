@@ -24,6 +24,9 @@ PATH_LEAK_RE = re.compile(r"(/workspace/|/root/|File \"/)")
 ABSOLUTE_PATH_RE = re.compile(r"(^|\s)/(?:home|Users|private|tmp|var|workspace|root|mnt|opt)/")
 UTC_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+GIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+GITHUB_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+GITHUB_URL_RE = re.compile(r"^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(actions/runs/[0-9]+|actions/workflows/.+)$")
 ID_RE = re.compile(r"^[a-z0-9_.-]+$")
 ALLOWED_CATEGORIES = {"frida", "ptrace", "dbi", "emulator", "debugger", "hardware_breakpoint", "mapping_integrity", "platform"}
 ALLOWED_POLICIES = {"preserve_expected_output", "configured_reaction_path", "audit_only"}
@@ -114,6 +117,30 @@ def validate_target(target: Any) -> None:
     require(isinstance(target["expected_result"], (str, int)), "target.expected_result: expected string or integer")
 
 
+def validate_ci_provenance(provenance: Any) -> None:
+    require(isinstance(provenance, dict), "ci_provenance: expected object")
+    require(provenance.get("provider") == "github-actions", "ci_provenance.provider: expected github-actions")
+    repository = require_string(provenance, "repository", "ci_provenance", 3)
+    require(repository == "unknown" or bool(GITHUB_REPO_RE.match(repository)),
+            "ci_provenance.repository: expected owner/repo or unknown")
+    run_id = require_string(provenance, "run_id", "ci_provenance", 1)
+    require(run_id == "unknown" or run_id.isdigit(), "ci_provenance.run_id: expected numeric GitHub run id or unknown")
+    run_attempt = require_string(provenance, "run_attempt", "ci_provenance", 1)
+    require(run_attempt == "unknown" or run_attempt.isdigit(),
+            "ci_provenance.run_attempt: expected numeric GitHub attempt or unknown")
+    require_string(provenance, "workflow", "ci_provenance", 1)
+    require_string(provenance, "workflow_ref", "ci_provenance", 1)
+    head_sha = require_string(provenance, "head_sha", "ci_provenance", 1)
+    require(head_sha == "unknown" or bool(GIT_SHA_RE.match(head_sha)),
+            "ci_provenance.head_sha: expected 40 hex Git commit SHA or unknown")
+    require_string(provenance, "head_branch", "ci_provenance", 1)
+    require_string(provenance, "event_name", "ci_provenance", 1)
+    for key in ["run_url", "workflow_url"]:
+        if key in provenance:
+            value = require_string(provenance, key, "ci_provenance", 8)
+            require(bool(GITHUB_URL_RE.match(value)), f"ci_provenance.{key}: expected GitHub Actions URL")
+
+
 def validate_bundle_file(path_value: str, expected_sha256: str, bundle_root: Path | None, ctx: str) -> None:
     if bundle_root is None:
         return
@@ -189,6 +216,8 @@ def validate_report(path: Path, allow_absolute_paths: bool, bundle_root: Path | 
     require(data.get("paper_claims_mutated") is False, f"{path}.paper_claims_mutated must be false")
     validate_runner(data.get("runner"))
     validate_target(data.get("target"))
+    if "ci_provenance" in data:
+        validate_ci_provenance(data["ci_provenance"])
     if bundle_root is not None:
         target = data["target"]
         validate_bundle_file(target["binary"], target["sha256"], bundle_root, "target.binary")

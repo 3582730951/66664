@@ -100,6 +100,66 @@
         }
       }
     },
+    "ci_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "repository",
+        "run_id",
+        "run_attempt",
+        "workflow",
+        "workflow_ref",
+        "head_sha",
+        "head_branch",
+        "event_name"
+      ],
+      "properties": {
+        "provider": {
+          "const": "github-actions"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 3
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_attempt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workflow": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workflow_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "head_sha": {
+          "type": "string",
+          "minLength": 1
+        },
+        "head_branch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "event_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_url": {
+          "type": "string",
+          "minLength": 8
+        },
+        "workflow_url": {
+          "type": "string",
+          "minLength": 8
+        }
+      }
+    },
     "checks": {
       "type": "array",
       "minItems": 1,
